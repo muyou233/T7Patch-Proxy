@@ -35,9 +35,14 @@ namespace hooks {
 		const char* hkInfo_ValueForKey(char* a1, __int64 a2) {
 			return Info_ValueForKey(a1, a2);
 		}
-
+		// Caused uninstalled content to show as available.
 		bool hkLiveInventory_IsValid(ControllerIndex_t controllerIndex) {
+
+			#if SPOOF_UNLOCK_ALL
 			return true;
+			#endif
+
+			return LiveInventory_IsValid(controllerIndex);
 		}
 
 		// Source: /gamedata/store/common/incentives.csv
