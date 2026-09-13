@@ -23,11 +23,6 @@ drop a single `d3d11.dll` into the game folder and you are done.
 
 - **Injector-free install via d3d11.dll proxy**
   - `BlackOps3.exe` statically imports `d3d11.dll` (only `D3D11CreateDevice`); this fork turns that into a DLL-hijack proxy
-  - `proxy/`: all 51 exports are forwarded to the real `System32\d3d11.dll` through assembly thunks
-    (`mov rax,[slot]; jmp rax`), ordinals aligned with the genuine DLL
-  - `D3D11CreateDevice` / `D3D11CreateDeviceAndSwapChain` are intercepted; patching runs on a dedicated
-    worker thread at renderer-init time (waits for the dvar table, then a 1500 ms settle delay —
-    verified necessary, do not remove)
 - **Centralized data folder**: config and logs live in a `T7Patch\` subfolder of the game directory
   (`t7patch.conf`, `t7patch_proxy.log`, `crashes.log`)
 - **Thread-safety fixes**

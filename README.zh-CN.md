@@ -20,9 +20,6 @@ T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃�
 
 - **d3d11.dll 代理安装（injectorless）**
   - `BlackOps3.exe` 静态导入 `d3d11.dll`（仅导入 `D3D11CreateDevice`），本 fork 借此实现 DLL 劫持代理
-  - `proxy/`：51 个导出全部经汇编转发桩（`mov rax,[slot]; jmp rax`）转发给真正的 `System32\d3d11.dll`，按原始序号对齐
-  - 拦截 `D3D11CreateDevice` / `D3D11CreateDeviceAndSwapChain`，在渲染器初始化时机由独立线程执行补丁
-    （先等 dvar 表发布，再等 1500ms 缓冲——该缓冲经验证是必要的，勿删）
 - **数据目录集中**：配置与日志统一放在游戏目录的 `T7Patch\` 子文件夹
   （`t7patch.conf`、`t7patch_proxy.log`、`crashes.log`）
 - **线程安全修复**
