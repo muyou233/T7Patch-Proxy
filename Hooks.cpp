@@ -278,7 +278,7 @@ namespace hooks {
 
 			strcpy_s(input, translatedString);
 			input[4095] = 0;
-			int max = strlen(input);
+			int max = (int)strlen(input);
 
 			for (int i = 0; i < max; i++)
 			{
@@ -348,7 +348,7 @@ namespace hooks {
 			char input[4096]{};
 			strcpy_s(input, source);
 			input[4095] = 0;
-			int max = strlen(input);
+			int max = (int)strlen(input);
 
 			bool b_replace = false;
 			for (int i = 0; i < max; i++)
@@ -427,7 +427,7 @@ namespace hooks {
 				else
 				{
 					// check if the last time we updated the private password was within the past second
-					if (GetTickCount64() <= Protection::PrivatePassword[2] + 1500)
+					if (GetTickCount64() <= (ULONGLONG)Protection::PrivatePassword[2] + 1500) // [LOCAL] C4018: compare in unsigned tick space
 					{
 						checksum = checksum ^ (unsigned __int16)Protection::PrivatePassword[1] ^ (unsigned __int16)Protection::PrivatePassword[0];
 						if (*(unsigned __int16*)(newLen + payload) == (unsigned __int16)checksum)
@@ -787,7 +787,7 @@ namespace hooks {
 			{
 				return 0;
 			}
-			int len = strlen(path);
+			int len = (int)strlen(path);
 			int keySize = 0;
 			for (int i = 0; i < len; i++)
 			{
@@ -817,7 +817,7 @@ namespace hooks {
 			{
 				return 0;
 			}
-			int len = strlen(path);
+			int len = (int)strlen(path);
 			int keySize = 0;
 			for (int i = 0; i < len; i++)
 			{
@@ -847,7 +847,7 @@ namespace hooks {
 			{
 				return 0;
 			}
-			int len = strlen(path);
+			int len = (int)strlen(path);
 			int keySize = 0;
 			for (int i = 0; i < len; i++)
 			{

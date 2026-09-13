@@ -728,7 +728,7 @@ void apply_settings()
 
 DWORD WINAPI MainThread(LPVOID lpParam)
 {
-    std::srand(time(NULL));
+    std::srand((unsigned int)time(NULL)); // [LOCAL] C4244: explicit time_t truncation
     *(__int32*)OFFSET(0x11250898) = rand();
 
     for (;;)

@@ -258,8 +258,9 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
             }
 
             fprintf(f, "Script Exception Type: %s", (ContextRecord->Rcx ? "Client" : "Server"));
-            fprintf(f, "Script Fatal Exception at : %p\n", fs[(int)ContextRecord->Rcx * 4]);
-            fprintf(f, "\t at: %s+%x", name, fs[(int)ContextRecord->Rcx * 4] - (INT64)ip);
+            // [LOCAL] C4477 fixups: %p wants void*, 64-bit offsets printed as %llx
+            fprintf(f, "Script Fatal Exception at : %p\n", (void*)fs[(int)ContextRecord->Rcx * 4]);
+            fprintf(f, "\t at: %s+%llx", name, (unsigned long long)(fs[(int)ContextRecord->Rcx * 4] - (INT64)ip));
             fprintf(f, "Error Message: %s\n", error_msg);
 
             std::fflush(f);
@@ -301,7 +302,7 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
             }
 
             //ALOG("Crash log %p\n\n", time(NULL));
-            fprintf(f, "Crash log %p\n\n", time(NULL));
+            fprintf(f, "Crash log %p\n\n", (void*)time(NULL));
             INT64 addy = (INT64)ExceptionRecord->ExceptionAddress;
             SavedExceptions[addy] = *ContextRecord;
             while (SavedExceptions.size())
@@ -324,27 +325,29 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
                 fprintf(f, "Module: %s\n", module_name);
 
                 //ALOG("[%p]Exception at (%p) (RIP:%p) (Rsp:%p) (RBP: %p)\n", faultingModule, kvp.first - faultingModule, kvp.second.Rip, kvp.second.Rsp, kvp.second.Rbp);
-                fprintf(f, "[%p]Exception at (%p) (RIP:%p) (Rsp: %p)\n", faultingModule, kvp.first - faultingModule, kvp.second.Rip, kvp.second.Rsp, kvp.second.Rbp);
+                // [LOCAL] C4474 fix: the (RBP: %p) placeholder was dropped from the
+                // format string while its argument stayed; restored it.
+                fprintf(f, "[%p]Exception at (%p) (RIP:%p) (Rsp: %p) (RBP: %p)\n", (void*)faultingModule, (void*)(kvp.first - faultingModule), (void*)kvp.second.Rip, (void*)kvp.second.Rsp, (void*)kvp.second.Rbp);
 
                 //ALOG("[%p]Rcx: (%p) Rdx: (%p) R8: (%p) R9: (%p)\n", kvp.first, kvp.second.Rcx, kvp.second.Rdx, kvp.second.R8, kvp.second.R9);
-                fprintf(f, "[%p]Rcx: (%p) Rdx: (%p) R8: (%p) R9: (%p)\n", kvp.first, kvp.second.Rcx, kvp.second.Rdx, kvp.second.R8, kvp.second.R9);
+                fprintf(f, "[%p]Rcx: (%p) Rdx: (%p) R8: (%p) R9: (%p)\n", (void*)kvp.first, (void*)kvp.second.Rcx, (void*)kvp.second.Rdx, (void*)kvp.second.R8, (void*)kvp.second.R9);
 
                 //ALOG("[%p]Rax: (%p) Rbx: (%p) Rsi: (%p) Rdi: (%p)\n", kvp.first, kvp.second.Rax, kvp.second.Rbx, kvp.second.Rsi, kvp.second.Rdi);
-                fprintf(f, "[%p]Rax: (%p) Rbx: (%p) Rsi: (%p) Rdi: (%p)\n", kvp.first, kvp.second.Rax, kvp.second.Rbx, kvp.second.Rsi, kvp.second.Rdi);
+                fprintf(f, "[%p]Rax: (%p) Rbx: (%p) Rsi: (%p) Rdi: (%p)\n", (void*)kvp.first, (void*)kvp.second.Rax, (void*)kvp.second.Rbx, (void*)kvp.second.Rsi, (void*)kvp.second.Rdi);
 
                 //ALOG("[%p]R10: (%p) R11: (%p) R12: (%p) R13: (%p)\n", kvp.first, kvp.second.R10, kvp.second.R11, kvp.second.R12, kvp.second.R13);
-                fprintf(f, "[%p]R10: (%p) R11: (%p) R12: (%p) R13: (%p)\n", kvp.first, kvp.second.R10, kvp.second.R11, kvp.second.R12, kvp.second.R13);
+                fprintf(f, "[%p]R10: (%p) R11: (%p) R12: (%p) R13: (%p)\n", (void*)kvp.first, (void*)kvp.second.R10, (void*)kvp.second.R11, (void*)kvp.second.R12, (void*)kvp.second.R13);
 
                 //ALOG("[%p]Rbp: (%p) R14: (%p) R15: (%p) Dr7: (%p)\n", kvp.first, kvp.second.Rbp, kvp.second.R14, kvp.second.R15, kvp.second.Dr7);
-                fprintf(f, "[%p]Rbp: (%p) R14: (%p) R15: (%p) Dr7: (%p)\n", kvp.first, kvp.second.Rbp, kvp.second.R14, kvp.second.R15, kvp.second.Dr7);
+                fprintf(f, "[%p]Rbp: (%p) R14: (%p) R15: (%p) Dr7: (%p)\n", (void*)kvp.first, (void*)kvp.second.Rbp, (void*)kvp.second.R14, (void*)kvp.second.R15, (void*)kvp.second.Dr7);
 
                 //ALOG("[%p]Dr0: (%p) Dr1: (%p) Dr2: (%p) Dr3: (%p)\n", kvp.first, kvp.second.Dr0, kvp.second.Dr1, kvp.second.Dr2, kvp.second.Dr3);
-                fprintf(f, "[%p]Dr0: (%p) Dr1: (%p) Dr2: (%p) Dr3: (%p)\n", kvp.first, kvp.second.Dr0, kvp.second.Dr1, kvp.second.Dr2, kvp.second.Dr3);
+                fprintf(f, "[%p]Dr0: (%p) Dr1: (%p) Dr2: (%p) Dr3: (%p)\n", (void*)kvp.first, (void*)kvp.second.Dr0, (void*)kvp.second.Dr1, (void*)kvp.second.Dr2, (void*)kvp.second.Dr3);
 
                 for (int i = 0; i < ((STATUS_ILLEGAL_INSTRUCTION == ExceptionRecord->ExceptionCode) ? 0x1200 : 0x400); i += 0x10)
                 {
                     //ALOG("[%p] %p %p\n", kvp.second.Rsp + i, *(int64_t*)(kvp.second.Rsp + i), *(int64_t*)(kvp.second.Rsp + i + 8));
-                    fprintf(f, "[%p] %p %p\n\n\n", kvp.second.Rsp + i, *(int64_t*)(kvp.second.Rsp + i), *(int64_t*)(kvp.second.Rsp + i + 8));
+                    fprintf(f, "[%p] %p %p\n\n\n", (void*)(kvp.second.Rsp + i), (void*)*(int64_t*)(kvp.second.Rsp + i), (void*)*(int64_t*)(kvp.second.Rsp + i + 8));
                 }
                 SavedExceptions.erase(kvp.first);
             }
