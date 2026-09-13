@@ -122,6 +122,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalDependencies>$(SolutionDir)minhook\lib\libMinHook.x64.lib;$(SolutionDir)detours\detours.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>proxy\d3d11.def</ModuleDefinitionFile>
     </Link>
     <PostBuildEvent>
