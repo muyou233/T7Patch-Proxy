@@ -1082,7 +1082,8 @@ void Protection::install()
 
     //Dvar_SetFromStringByName("sv_mapswitch", "0", true); // Caused inf black screen when loading campaign maps.
 
-    Dvar_SetFromStringByName("maxvoicepacketsperframe", "0", true);
+    // [LOCAL] removed: maxvoicepacketsperframe=0 disabled in-game voice processing
+    // for a negligible CPU saving; keeping in-game voice working is worth more.
 
     if (IsInjectorlessInstall)
     {
