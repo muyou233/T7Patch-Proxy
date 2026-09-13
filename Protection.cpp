@@ -1,5 +1,7 @@
 #include "Protection.h"
 
+#include <mutex> // [LOCAL] guards for friends_set / dlcContent (see below)
+
 bool has_set_window_text = false;
 bool Protection::IsFriendsOnly = false;
 bool Protection::IsInjectorlessInstall = true;
@@ -188,8 +190,18 @@ EXPORT void SetPlayerName(const char* name)
     strcpy_s(Protection::CustomName, name);
     Protection::CustomName[sizeof(Protection::CustomName) - 1] = 0;
 
-    strncpy_s((char*)(pUserData + 0x8), 16, Protection::CustomName, sizeof(Protection::CustomName));
-    strncpy_s((char*)(pNameBuffer), 16, Protection::CustomName, sizeof(Protection::CustomName));
+    // [LOCAL] An empty name means "leave the game's own name alone".  Writing an
+    // empty string into these two game buffers would instead blank the name out
+    // everywhere that reads them, so only touch them for a real custom name.
+    // Note: clearing a name that was set earlier in the same session leaves the
+    // previous value in those buffers until the next game start, which is when
+    // this function first sees the empty name.  The Steam paths below still
+    // revert immediately.
+    if (*Protection::CustomName)
+    {
+        strncpy_s((char*)(pUserData + 0x8), 16, Protection::CustomName, sizeof(Protection::CustomName));
+        strncpy_s((char*)(pNameBuffer), 16, Protection::CustomName, sizeof(Protection::CustomName));
+    }
 }
 
 EXPORT void SetNetworkPassword(const char* pass)
@@ -248,23 +260,47 @@ bool Protection::ReadP2PPacket(uintptr_t thisptr, void* pub_dest, unsigned int c
 
 const char* Protection::GetUsernamePtr(INT64 a)
 {
+    // [LOCAL] With no custom name configured, hand the real Steam persona name
+    // back to the game instead of blanking it out.
+    if (!CustomName[0])
+    {
+        auto original = (const char* (__fastcall*)(INT64))GetOriginalSteamPtr(
+            STEAMAPI_STEAMUSER, STEAMAPI_STEAMUSER_GETUSERNAME);
+
+        if (original)
+        {
+            return original(a);
+        }
+        return "";
+    }
+
     return CustomName;
 }
 
 unsigned __int64 next_update_friendslist_time = 0;
 std::unordered_set<__int64> friends_set;
+// [LOCAL] friends_set is read from Steam-callback/game threads and rebuilt every
+// 30s. It used to be clear()+insert()'ed in place with no lock, so concurrent
+// readers could observe an empty set (friends treated as non-friends) or crash
+// on a rehash mid-find. Now: rebuild into a local set, then swap under the lock.
+std::mutex friends_set_mutex;
 bool Protection::IsFriendByXUIDUncached(__int64 xuid) // ok I say its "uncached" but thats because I don't want this running a billion times per second and I think it might hitch with huge friends lists.
 {
-    if (GetTickCount64() < next_update_friendslist_time || !(*(char*)OFF_s_runningUILevel)) // we will just not update the friends list in game because I really think this will hitch. STEAMAPI SUCKS
     {
-        return friends_set.find(xuid) != friends_set.end();
+        std::lock_guard<std::mutex> lock(friends_set_mutex);
+        if (GetTickCount64() < next_update_friendslist_time || !(*(char*)OFF_s_runningUILevel)) // we will just not update the friends list in game because I really think this will hitch. STEAMAPI SUCKS
+        {
+            return friends_set.find(xuid) != friends_set.end();
+        }
     }
 
     auto isteamfriends = *(__int64*)STEAMAPI_FRIENDS;
     auto fn_GetFriendCount = *(__int64*)(*(__int64*)isteamfriends + 0x18);
     int num_friends = ((int(__fastcall*)(__int64, int))fn_GetFriendCount)(isteamfriends, 4);
 
-    friends_set.clear();
+    // [LOCAL] collect into a local set first: the Steam calls below can block,
+    // and they must not run while the mutex is held.
+    std::unordered_set<__int64> rebuilt;
 
     // GetFriendByIndex must have been different in the api they used back then
     auto fn_GetFriendByIndex = *(__int64*)(*(__int64*)isteamfriends + 0x20);
@@ -274,16 +310,27 @@ bool Protection::IsFriendByXUIDUncached(__int64 xuid) // ok I say its "uncached"
         ((void(__fastcall*)(__int64, __int64&, int, int))fn_GetFriendByIndex)(isteamfriends, out_friend, i, 4);
         if (out_friend)
         {
-            friends_set.insert(out_friend);
+            rebuilt.insert(out_friend);
         }
     }
 
-    next_update_friendslist_time = GetTickCount64() + 30 * 1000; // once every 30 seconds
-    return friends_set.find(xuid) != friends_set.end();
+    bool result = false;
+    {
+        std::lock_guard<std::mutex> lock(friends_set_mutex);
+        friends_set.swap(rebuilt); // [LOCAL] readers never see a half-built set
+        next_update_friendslist_time = GetTickCount64() + 30 * 1000; // once every 30 seconds
+        result = friends_set.find(xuid) != friends_set.end();
+    }
+    return result;
 }
 
 unsigned __int64 check_dlc_next = 0;
 std::unordered_map<INT32, bool> dlcContent;
+// [LOCAL] dlcContent is shared by GetOwnsContent/GetOwnsContent2, which can be
+// called from different threads. operator[] inserts (and can rehash) on miss,
+// so an unlocked find() racing it is undefined behaviour. The Steam round-trip
+// stays outside the lock; only the cache lookup/update is serialized.
+std::mutex dlc_content_mutex;
 // BIsDlcInstalled
 // 0x30 has similar signature and seems to be used the same way
 // 0x18 isvacbanned
@@ -295,12 +342,22 @@ bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
         return true;
     #endif
 
-    if (dlcContent.find(itemid) == dlcContent.end())
+    // [LOCAL] previously: unlocked find() + operator[] write, racing other threads
     {
-        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
-        dlcContent[itemid] = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT))(_interface, itemid);
+        std::lock_guard<std::mutex> lock(dlc_content_mutex);
+        auto it = dlcContent.find(itemid);
+        if (it != dlcContent.end())
+            return it->second;
     }
-    return dlcContent[itemid];
+
+    bool result = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT))(_interface, itemid);
+
+    {
+        std::lock_guard<std::mutex> lock(dlc_content_mutex);
+        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
+        dlcContent[itemid] = result;
+    }
+    return result;
 }
 
 bool Protection::GetOwnsContent2(INT64 _interface, INT32 itemid)
@@ -309,12 +366,22 @@ bool Protection::GetOwnsContent2(INT64 _interface, INT32 itemid)
         return true;
     #endif
 
-    if (dlcContent.find(itemid) == dlcContent.end())
+    // [LOCAL] previously: unlocked find() + operator[] write, racing other threads
     {
-        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
-        dlcContent[itemid] = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT2))(_interface, itemid);
+        std::lock_guard<std::mutex> lock(dlc_content_mutex);
+        auto it = dlcContent.find(itemid);
+        if (it != dlcContent.end())
+            return it->second;
     }
-    return dlcContent[itemid];
+
+    bool result = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT2))(_interface, itemid);
+
+    {
+        std::lock_guard<std::mutex> lock(dlc_content_mutex);
+        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
+        dlcContent[itemid] = result;
+    }
+    return result;
 }
 
 bool Protection::IsVacBanned(INT64 a)
@@ -435,7 +502,9 @@ __int64 Protection::CreateLobby(INT64 api, __int32 lobbyCreateType, __int32 maxp
 
 const char* Protection::GetUsernameXUIDPtr(INT64 a, INT64 b)
 {
-    if (b == **(__int64**)s_playerData_ptr)
+    // [LOCAL] Only answer for our own XUID, and only when a custom name is
+    // actually configured - otherwise fall through to the real Steam lookup.
+    if (b == **(__int64**)s_playerData_ptr && CustomName[0])
     {
         return CustomName;
     }
@@ -531,7 +600,10 @@ struct patch_config
         exists = false;
         modified = std::filesystem::file_time_type();
         __playername();
-        strcat_s(playername, "Unknown Soldier");
+        // [LOCAL] Was: strcat_s(playername, "Unknown Soldier");
+        // An empty playername now means "do not override the name the game
+        // already has", so start with no custom name at all.  Set
+        // playername=<name> in t7patch.conf to override it.
     }
 
     void __playername()
@@ -675,6 +747,10 @@ DWORD WINAPI MainThread(LPVOID lpParam)
 
 void load_settings_initial()
 {
+    // [LOCAL] Cheap and idempotent - DllMain already did this, but the config
+    // folder must exist before the very first read/write either way.
+    t7patch_ensure_data_dir();
+
     if (!fs_exists(PATCH_CONFIG_LOCATION))
     {
         user_config.saveto(PATCH_CONFIG_LOCATION);

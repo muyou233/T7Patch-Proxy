@@ -336,7 +336,8 @@ namespace hooks {
 			if (size < 0)
 			{
 				*dest = 0;
-				*source = 0;
+				// [LOCAL] removed "*source = 0": source is the buffer we read FROM
+				// and can live in read-only memory; writing it is an access violation.
 				return 0;
 			}
 			return qmemcpy(dest, source, size);

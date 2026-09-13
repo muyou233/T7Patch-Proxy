@@ -136,10 +136,31 @@ inline std::vector<std::string> legit_packets = {
 	"cfl"
 };
 
-#define CRASH_LOG_NAME "crashes.log"
-#define PATCH_CONFIG_LOCATION "t7patch.conf"
+// [LOCAL] Generated files now live in a "T7Patch" subfolder instead of being
+// dropped straight into the game directory.
+//
+// The paths stay relative on purpose.  Steam starts the game with its working
+// directory set to the game folder, and the crash log is written from an
+// exception handler that must not depend on anything heavier than fopen().
+#define T7PATCH_DATA_DIR "T7Patch"
+#define CRASH_LOG_NAME T7PATCH_DATA_DIR "\\crashes.log"
+#define PATCH_CONFIG_LOCATION T7PATCH_DATA_DIR "\\t7patch.conf"
+
+// Creates that folder once, on first use.  Idempotent, and safe to call from
+// DllMain - CreateDirectoryA does not touch the loader lock.
+inline void t7patch_ensure_data_dir()
+{
+    static const int created = []() -> int
+    {
+        return (CreateDirectoryA(T7PATCH_DATA_DIR, nullptr) ||
+                GetLastError() == ERROR_ALREADY_EXISTS) ? 1 : 0;
+    }();
+    (void)created;
+}
+
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
-#define ZBR_VERSION_FULL "Patch 3.06 - by serious <3"
+// [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")
+#define ZBR_VERSION_FULL "Patch 3.06"
 #define SPOOF_UNLOCK_ALL false
 #define SPOOF_SKIP_CWL false
 #define SPOOF_GUM_COUNT 255

@@ -62,5 +62,14 @@
     <ClCompile Include="Protection.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="proxy\Proxy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <MASM Include="proxy\thunks.asm">
+      <Filter>Source Files</Filter>
+    </MASM>
+    <None Include="proxy\d3d11.def">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

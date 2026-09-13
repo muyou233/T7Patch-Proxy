@@ -1,5 +1,10 @@
 #include "framework.h"
 
+// Implemented in proxy/Proxy.cpp.  Loads the genuine System32\d3d11.dll and
+// fills in the export forwarder table, so this DLL can also be installed as a
+// drop-in d3d11.dll proxy instead of being injected by T7Patch.exe.
+extern "C" void ProxyResolveExports();
+
 typedef LONG(NTAPI* NtSuspendProcess)(IN HANDLE ProcessHandle);
 void SuspendProcess()
 {
@@ -260,7 +265,7 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
             std::fflush(f);
             std::fclose(f);
 
-            MessageBoxA(NULL, "Unfortunately, a fatal script error has occured in Black Ops III. The error has been recorded in steamapps/common/Black Ops III/crashes.log.", "Fatal Script Error", MB_OK);
+            MessageBoxA(NULL, "Unfortunately, a fatal script error has occured in Black Ops III. The error has been recorded in the T7Patch folder (crashes.log).", "Fatal Script Error", MB_OK);
             exit(0);
         }
 
@@ -492,8 +497,9 @@ void RunPatching()
 	// Initialize MinHook
     MH_Initialize();
 
-	// Set a default player name if none is set
-    if (!*Protection::CustomName) { snprintf(Protection::CustomName, 16, "Unknown Soldier"); }
+	// [LOCAL] Was: if (!*Protection::CustomName) { snprintf(..., "Unknown Soldier"); }
+	// An empty CustomName now means "leave the game's own name alone", so no
+	// default is seeded here.  See Protection::GetUsernamePtr().
 
     // Apply VMP Hooks
     hooks::ApplyVMTHooks();
@@ -597,6 +603,19 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     case DLL_PROCESS_ATTACH:
     {
         DisableThreadLibraryCalls(hModule);
+
+        // [LOCAL] Create <game folder>\T7Patch before anything can write into
+        // it.  This has to happen this early because the crash log is written
+        // from an exception handler, which may fire long before the patch is
+        // actually applied - and a failed fopen() there aborts the process.
+        t7patch_ensure_data_dir();
+
+        // When installed as a d3d11.dll proxy the game loads this module
+        // during process initialisation, before any exported entry point can
+        // be called.  Resolving the real d3d11.dll here keeps every forwarder
+        // in proxy/thunks.asm valid from the very first call.
+        // The patching itself is NOT started here - see proxy/Proxy.cpp.
+        ProxyResolveExports();
         break;
     }
     }

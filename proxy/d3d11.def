@@ -1,0 +1,78 @@
+; =====================================================================
+;  proxy/d3d11.def
+; ---------------------------------------------------------------------
+;  Export table of the d3d11.dll proxy.
+;
+;  This mirrors the export surface of the real %SystemRoot%\System32\
+;  d3d11.dll one-for-one.  Everything is exported by *name*, and ordinals
+;  1..50 additionally match the real dll exactly, so importers that use
+;  either form keep resolving.
+;
+;  The real dll's ordinal 0 (D3D11CreateDeviceForD3D12) is the one entry we
+;  cannot reproduce: MSVC's linker rejects "@0" with LNK1119, so that entry
+;  is placed at 51 instead.  Nothing imports it by ordinal anyway - and in
+;  practice nothing imports d3d11.dll by ordinal at all.  BlackOps3.exe
+;  imports D3D11CreateDevice by name.
+;
+;  Ordinals 21 and 22 resolve to the C++ implementations in Proxy.cpp
+;  (they are the only two entries T7Patch needs to intercept).  Every
+;  other entry is a forwarder emitted by proxy/thunks.asm.
+;
+;  Keep the names in sync with kExportNames[] in Proxy.cpp and with the
+;  mkthunk list in proxy/thunks.asm.
+; =====================================================================
+
+LIBRARY d3d11
+
+EXPORTS
+    D3D11CreateDeviceForD3D12                @51
+    D3DKMTCloseAdapter                       @1
+    D3DKMTDestroyAllocation                  @2
+    D3DKMTDestroyContext                     @3
+    D3DKMTDestroyDevice                      @4
+    D3DKMTDestroySynchronizationObject       @5
+    D3DKMTPresent                            @6
+    D3DKMTQueryAdapterInfo                   @7
+    D3DKMTSetDisplayPrivateDriverFormat      @8
+    D3DKMTSignalSynchronizationObject        @9
+    D3DKMTUnlock                             @10
+    D3DKMTWaitForSynchronizationObject       @11
+    EnableFeatureLevelUpgrade                @12
+    OpenAdapter10                            @13
+    OpenAdapter10_2                          @14
+    CreateDirect3D11DeviceFromDXGIDevice     @15
+    CreateDirect3D11SurfaceFromDXGISurface   @16
+    D3D11CoreCreateDevice                    @17
+    D3D11CoreCreateLayeredDevice             @18
+    D3D11CoreGetLayeredDeviceSize            @19
+    D3D11CoreRegisterLayers                  @20
+    D3D11CreateDevice                        @21
+    D3D11CreateDeviceAndSwapChain            @22
+    D3D11On12CreateDevice                    @23
+    D3DKMTCreateAllocation                   @24
+    D3DKMTCreateContext                      @25
+    D3DKMTCreateDevice                       @26
+    D3DKMTCreateSynchronizationObject        @27
+    D3DKMTEscape                             @28
+    D3DKMTGetContextSchedulingPriority       @29
+    D3DKMTGetDeviceState                     @30
+    D3DKMTGetDisplayModeList                 @31
+    D3DKMTGetMultisampleMethodList           @32
+    D3DKMTGetRuntimeData                     @33
+    D3DKMTGetSharedPrimaryHandle             @34
+    D3DKMTLock                               @35
+    D3DKMTOpenAdapterFromHdc                 @36
+    D3DKMTOpenResource                       @37
+    D3DKMTQueryAllocationResidency           @38
+    D3DKMTQueryResourceInfo                  @39
+    D3DKMTRender                             @40
+    D3DKMTSetAllocationPriority              @41
+    D3DKMTSetContextSchedulingPriority       @42
+    D3DKMTSetDisplayMode                     @43
+    D3DKMTSetGammaRamp                       @44
+    D3DKMTSetVidPnSourceOwner                @45
+    D3DKMTWaitForVerticalBlankEvent          @46
+    D3DPerformance_BeginEvent                @47
+    D3DPerformance_EndEvent                  @48
+    D3DPerformance_GetStatus                 @49
+    D3DPerformance_SetMarker                 @50
