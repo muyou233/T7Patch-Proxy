@@ -17,7 +17,8 @@ drop a single `d3d11.dll` into the game folder and you are done.
 - **Reduced attack surface**: workshop UGC subscription disabled, in-game browser opening disabled
 - **Name override**: override your in-game name via the config file; leave it empty to keep your Steam name
 - **Performance-related tweaks**: raised process scheduling priority; cached Steam DLC/ownership checks
-  (mitigates the known stutter when DLCs are missing); per-frame voice packet limit (`maxvoicepacketsperframe = 0`)
+  (mitigates the stutter caused by Steam's endless DLC scanning); per-frame voice packet limit
+  (`maxvoicepacketsperframe = 0`)
 
 ## What this fork changes (vs upstream)
 
