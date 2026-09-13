@@ -25,7 +25,7 @@ T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃�
 
 ## 安装
 
-1. 构建（见下文），得到 `x64\Release\d3d11.dll`
+1. 从 [Releases](../../releases) 页下载 `d3d11.dll`（或自行构建）
 2. 关闭游戏，把 `d3d11.dll` 复制到游戏目录（与 `BlackOps3.exe` 同层）
 3. 启动游戏，右上角出现 `Patch 3.06` 即安装成功；游戏目录会自动生成 `T7Patch\` 文件夹
 4. **卸载**：删除该 `d3d11.dll` 即可，游戏本体未被修改
@@ -39,21 +39,3 @@ T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃�
 | `playername=` | 留空 = 使用 Steam 昵称；填值 = 覆盖游戏内昵称 |
 | `isfriendsonly=` | `1` = 仅好友可加入/互动（推荐） |
 | `networkpassword=` | 房间密码，配合仅好友使用 |
-
-## 构建
-
-- Visual Studio 2022+（含 Desktop C++ 与 MASM 组件）
-- 打开 `T7Patch.slnx`，选 **Release + x64**（Win32 平台不可用），仅"生成"
-- 产物：`x64\Release\d3d11.dll`（代理入口）与 `T7Patch.dll`（注入器路线备用，载荷相同）
-- 更改代码后需手动把新的 `d3d11.dll` 覆盖到游戏目录（先关游戏）
-
-## 注意
-
-- 补丁内含大量针对当前游戏构建的硬编码偏移；**游戏更新后可能静默失效**（版本指纹不匹配时补丁不会应用）
-- 联机建议始终开启 `networkpassword` + `isfriendsonly=1`
-- 本项目仅供学习研究，与 Activision / Treyarch 无关
-
-## 致谢
-
-- 上游与原作者：[Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src)（serious / Emma / ssno 及贡献者）
-- 社区贡献：SashaPrawn（编译期 SPOOF 清理、incentive 过滤）、Luisete2105 等

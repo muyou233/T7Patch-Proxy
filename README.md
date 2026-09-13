@@ -28,7 +28,7 @@ drop a single `d3d11.dll` into the game folder and you are done.
 
 ## Install
 
-1. Build (see below) to get `x64\Release\d3d11.dll`
+1. Get `d3d11.dll` from the [Releases](../../releases) page (or build it yourself)
 2. Close the game, copy `d3d11.dll` next to `BlackOps3.exe`
 3. Launch the game — `Patch 3.06` in the top-right corner means success; a `T7Patch\` folder is created automatically
 4. **Uninstall**: delete that `d3d11.dll`; the game files are never modified
@@ -42,22 +42,3 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `playername=` | empty = Steam persona name; set = override in-game name |
 | `isfriendsonly=` | `1` = friends only (recommended) |
 | `networkpassword=` | room password, use together with friends-only |
-
-## Build
-
-- Visual Studio 2022+ with Desktop C++ and the MASM component
-- Open `T7Patch.slnx`, select **Release + x64** (Win32 is not supported), build only
-- Output: `x64\Release\d3d11.dll` (proxy entry) and `T7Patch.dll` (same payload for the injector route)
-- After code changes, copy the fresh `d3d11.dll` into the game folder manually (close the game first)
-
-## Notes
-
-- The patch relies on hard-coded offsets for a specific game build; it may **silently stop applying
-  after a game update** (build fingerprint mismatch)
-- Always play with `networkpassword` + `isfriendsonly=1`
-- For educational purposes only. Not affiliated with Activision / Treyarch.
-
-## Credits
-
-- Upstream & original author: [Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src) (serious / Emma / ssno and contributors)
-- Community contributions: SashaPrawn (compile-time SPOOF cleanup, incentive filter), Luisete2105, and others
