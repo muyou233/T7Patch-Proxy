@@ -53,3 +53,8 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `playername=` | empty = Steam persona name; set = override in-game name |
 | `isfriendsonly=` | `1` = friends only (recommended) |
 | `networkpassword=` | room password, use together with friends-only |
+
+## Credits
+
+- Original project: [shiversoftdev/t7patch](https://github.com/shiversoftdev/t7patch)
+- Source upstream: [Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src)

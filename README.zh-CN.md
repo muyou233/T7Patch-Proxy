@@ -47,3 +47,8 @@ T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃�
 | `playername=` | 留空 = 使用 Steam 昵称；填值 = 覆盖游戏内昵称 |
 | `isfriendsonly=` | `1` = 仅好友可加入/互动（推荐） |
 | `networkpassword=` | 房间密码，配合仅好友使用 |
+
+## 致谢
+
+- 原始项目：[shiversoftdev/t7patch](https://github.com/shiversoftdev/t7patch)
+- 源码上游：[Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src)
