@@ -7,6 +7,16 @@ T7Patch is a community security / anti-crash patch for Call of Duty: Black Ops I
 On top of upstream, this fork adds an **injector-free** install path:
 drop a single `d3d11.dll` into the game folder and you are done.
 
+## What the patch does
+
+- **Online protection**: connection-packet whitelist (only legit packets pass), private-room
+  password and message-prefix validation
+- **Friends-only mode**: non-friends cannot invite you, pull you into lobbies, or interact with you
+- **Anti-remote-crash**: guards against malformed packets and out-of-bounds access
+  (message types, model/script indices, string replacement, memory-copy bounds, and more)
+- **Reduced attack surface**: workshop UGC subscription disabled, in-game browser opening disabled
+- **Name override**: override your in-game name via the config file; leave it empty to keep your Steam name
+
 ## What this fork changes (vs upstream)
 
 - **Injector-free install via d3d11.dll proxy**
@@ -22,9 +32,8 @@ drop a single `d3d11.dll` into the game folder and you are done.
   - `friends_set` and the `dlcContent` cache were unsynchronized shared state; concurrent access could
     misjudge friends or crash. Both are now mutex-guarded, with Steam calls kept outside the lock
   - `hkqmemcpy`: the `size < 0` branch no longer writes to the source buffer (which may be read-only)
-- **In-game version string** trimmed to `Patch 3.06` (`ZBR_VERSION_FULL` in `framework.h`)
 - All upstream features retained: connection-packet filtering, private-room prefix, non-friend invite
-  blocking, Steam-name override (leave the conf value empty to keep your Steam name), etc.
+  blocking, Steam-name override, etc.
 
 ## Install
 
