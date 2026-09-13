@@ -17,21 +17,8 @@ drop a single `d3d11.dll` into the game folder and you are done.
 - **Reduced attack surface**: workshop UGC subscription disabled, in-game browser opening disabled
 - **Name override**: override your in-game name via the config file; leave it empty to keep your Steam name
 - **Performance-related tweaks**: cached Steam DLC/ownership checks (mitigates the stutter caused by
-  Steam's endless DLC scanning); raised process scheduling priority
-
-## Stutter fix (built in)
-
-If a legacy **`d3dcompiler_46.dll`** ships next to `BlackOps3.exe`, the engine compiles HLSL shaders
-through this old runtime compiler on the fly — causing hitching whenever a map loads or an effect
-first appears.
-
-**This patch handles it automatically**: the `d3d11.dll` proxy intercepts in-process loads of
-`d3dcompiler_46.dll` (equivalent to the file not existing), so the engine falls back to the modern
-`D3DCompiler_47` pipeline and the stutter disappears. No manual step is needed; the interception
-status of each launch is logged to `T7Patch\t7patch_block.log`.
-
-Without this patch, deleting the file from the game folder achieves the same result (safe to
-delete, the game does not require version 46).
+  Steam's endless DLC scanning); raised process scheduling priority; blocks the game from loading
+  the old shader compiler so the system's newer one is used instead
 
 ## What this fork changes (vs upstream)
 
