@@ -3,5 +3,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="T7Patch.vcxproj" Id="1a13e977-f778-41f1-81e8-4f9ef6e3725a" />
+  <Project Path="T7Patch.vcxproj" Id="1a13e977-f778-41f1-81e8-4f9ef6e3725a">
+    <BuildType Solution="Debug|x64" Project="Release" />
+  </Project>
 </Solution>

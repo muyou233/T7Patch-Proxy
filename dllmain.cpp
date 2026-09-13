@@ -510,6 +510,11 @@ void RunPatching()
 	// Apply MinHook hooks
 	hooks::ApplyHooks();
 
+	// [LOCAL] Block in-process loading of the legacy d3dcompiler_46.dll.
+	// Must run after MH_Initialize (ApplyHooks' hooks stay enabled through
+	// their own MH_EnableHook(MH_ALL_HOOKS); this hook enables itself).
+	hooks::InstallD3DCompilerBlock();
+
 	// Apply Memory patches
 	hooks::ApplyMemoryPatches();
 
@@ -597,6 +602,22 @@ EXPORT void Unload()
     CloseHandle(hThreadSnap);
 }
 
+// [LOCAL] Early-arming thread for the legacy d3dcompiler_46 block.  The game
+// loads d3dcompiler_46.dll during renderer initialisation, which can happen
+// before RunPatching() runs, so the hook must be installed early - but not so
+// early that the (non-atomic) code-byte patch could race with another thread
+// executing LoadLibraryExW.  The loader lock already delays this thread until
+// DLL loading is done; the extra 500 ms margin makes the installation
+// effectively single-threaded.  Timeline measured on this machine: library
+// resolution at +0.0 s, this thread free at ~+6.6 s, renderer device creation
+// at ~+14.4 s - so 500 ms costs nothing.
+static DWORD WINAPI D3DCBlockEarlyThread(LPVOID)
+{
+    Sleep(500);
+    hooks::InstallD3DCompilerBlock();
+    return 0;
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule,
     DWORD  ul_reason_for_call,
     LPVOID lpReserved)
@@ -619,6 +640,11 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         // in proxy/thunks.asm valid from the very first call.
         // The patching itself is NOT started here - see proxy/Proxy.cpp.
         ProxyResolveExports();
+
+        // [LOCAL] Arm the d3dcompiler_46 block now.  This module is statically
+        // imported by BlackOps3.exe, so this DllMain runs before any game code;
+        // the thread below starts as soon as the loader lock is released.
+        CreateThread(nullptr, 0, D3DCBlockEarlyThread, nullptr, 0, nullptr);
         break;
     }
     }

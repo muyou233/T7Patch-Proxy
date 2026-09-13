@@ -16,12 +16,23 @@ T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃�
 - **昵称覆盖**：通过配置文件覆盖游戏内昵称，留空则使用 Steam 昵称
 - **性能相关调整**：缓存 Steam DLC/所有权查询结果，缓解 Steam 反复扫描 DLC 产生的卡顿；提升进程调度优先级
 
+## 卡顿修复（内置）
+
+如果 `BlackOps3.exe` 旁边带有旧版 **`d3dcompiler_46.dll`**，引擎会通过这个旧运行时编译器实时编译
+HLSL 着色器 —— 每次加载地图或特效首次出现时就会掉帧。
+
+**本补丁已自动处理**：`d3d11.dll` 代理会在进程内拦截对 `d3dcompiler_46.dll` 的加载（等效于该文件
+不存在），引擎因此回落到新版 `D3DCompiler_47` 管线，卡顿消失 —— 无需任何手动操作。每次启动的
+拦截状态记录在 `T7Patch\t7patch_block.log`。
+
+不使用本补丁时，手动删除游戏目录下的该文件也能达到同样效果（删除安全，游戏并不需要 46 版）。
+
 ## 与上游的差异
 
 - **d3d11.dll 代理安装（injectorless）**
   - `BlackOps3.exe` 静态导入 `d3d11.dll`（仅导入 `D3D11CreateDevice`），本 fork 借此实现 DLL 劫持代理
 - **数据目录集中**：配置与日志统一放在游戏目录的 `T7Patch\` 子文件夹
-  （`t7patch.conf`、`t7patch_proxy.log`、`crashes.log`）
+  （`t7patch.conf`、`t7patch_proxy.log`、`t7patch_block.log`、`crashes.log`）
 - **线程安全修复**
   - `friends_set`（好友集合）与 `dlcContent`（DLC 缓存）原本为无锁共享状态，
     多线程并发下可能误判好友或崩溃；现已加互斥锁，Steam 调用保持在锁外

@@ -19,12 +19,26 @@ drop a single `d3d11.dll` into the game folder and you are done.
 - **Performance-related tweaks**: cached Steam DLC/ownership checks (mitigates the stutter caused by
   Steam's endless DLC scanning); raised process scheduling priority
 
+## Stutter fix (built in)
+
+If a legacy **`d3dcompiler_46.dll`** ships next to `BlackOps3.exe`, the engine compiles HLSL shaders
+through this old runtime compiler on the fly — causing hitching whenever a map loads or an effect
+first appears.
+
+**This patch handles it automatically**: the `d3d11.dll` proxy intercepts in-process loads of
+`d3dcompiler_46.dll` (equivalent to the file not existing), so the engine falls back to the modern
+`D3DCompiler_47` pipeline and the stutter disappears. No manual step is needed; the interception
+status of each launch is logged to `T7Patch\t7patch_block.log`.
+
+Without this patch, deleting the file from the game folder achieves the same result (safe to
+delete, the game does not require version 46).
+
 ## What this fork changes (vs upstream)
 
 - **Injector-free install via d3d11.dll proxy**
   - `BlackOps3.exe` statically imports `d3d11.dll` (only `D3D11CreateDevice`); this fork turns that into a DLL-hijack proxy
 - **Centralized data folder**: config and logs live in a `T7Patch\` subfolder of the game directory
-  (`t7patch.conf`, `t7patch_proxy.log`, `crashes.log`)
+  (`t7patch.conf`, `t7patch_proxy.log`, `t7patch_block.log`, `crashes.log`)
 - **Thread-safety fixes**
   - `friends_set` and the `dlcContent` cache were unsynchronized shared state; concurrent access could
     misjudge friends or crash. Both are now mutex-guarded, with Steam calls kept outside the lock

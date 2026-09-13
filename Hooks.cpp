@@ -1,4 +1,5 @@
 #include "Hooks.h"
+#include <cstdarg>
 
 const char zbr_window_text[] = ZBR_WINDOW_TEXT;
 void* pOriginalGSFailure = nullptr;
@@ -1008,6 +1009,168 @@ namespace hooks {
 	void DestroyHooks()
 	{
 		MH_DisableHook(MH_ALL_HOOKS);
+	}
+
+	// [LOCAL] ============================================================
+	// Legacy shader-compiler blocker.
+	//
+	// A d3dcompiler_46.dll found next to BlackOps3.exe makes the engine
+	// compile HLSL shaders through the old runtime compiler on the fly,
+	// which shows up as hitching whenever a map loads or an effect first
+	// appears.  Deleting the file fixes it (user-verified), so we emulate
+	// exactly that: LoadLibraryExW returns NULL for this module and the
+	// engine falls back to the modern D3DCompiler_47 pipeline.
+	// ============================================================
+	static HMODULE(WINAPI* fpLoadLibraryExW)(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) = nullptr;
+	static volatile LONG d3dc_block_count = 0;
+
+	// [LOCAL] Append one line to <game folder>\T7Patch\t7patch_block.log.  Used
+	// both for install diagnostics and for every intercepted load, so the user
+	// can verify the feature without any external tooling.
+	//
+	// The path is resolved from the main module location instead of the current
+	// working directory: T7PATCH_DATA_DIR is relative by design, but an
+	// intercepted LoadLibrary call can happen on a thread whose working
+	// directory is not the game folder, which would silently lose the log.
+	static void d3dc_block_write_log(const char* fmt, ...)
+	{
+		char exe_path[MAX_PATH] = {};
+		GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+		char* slash = strrchr(exe_path, '\\');
+		if (slash)
+			*slash = '\0';
+
+		char log_path[MAX_PATH * 2];
+		snprintf(log_path, sizeof(log_path), "%s\\T7Patch\\t7patch_block.log", exe_path);
+
+		// Cap the log size: once it grows past 64 KB, rotate it to
+		// t7patch_block.log.old (replacing any previous .old) so the file can
+		// never grow without bound while keeping one generation of history.
+		WIN32_FILE_ATTRIBUTE_DATA logAttr = {};
+		if (GetFileAttributesExA(log_path, GetFileExInfoStandard, &logAttr))
+		{
+			const long long logSize =
+				((long long)logAttr.nFileSizeHigh << 32) | logAttr.nFileSizeLow;
+			if (logSize > 64 * 1024)
+			{
+				char old_path[MAX_PATH * 2];
+				snprintf(old_path, sizeof(old_path), "%s.old", log_path);
+				MoveFileExA(log_path, old_path, MOVEFILE_REPLACE_EXISTING);
+			}
+		}
+
+		FILE* f = fopen(log_path, "a+");
+		if (!f)
+			return;
+
+		// Timestamp format intentionally matches t7patch_proxy.log
+		// ([HH:MM:SS.mmm]) so the two logs can be merged and sorted into a
+		// single timeline:  Get-Content proxy.log, block.log | Sort-Object
+		SYSTEMTIME st = {};
+		GetLocalTime(&st);
+		fprintf(f, "[%02u:%02u:%02u.%03u] ",
+			st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
+
+		va_list ap;
+		va_start(ap, fmt);
+		vfprintf(f, fmt, ap);
+		va_end(ap);
+
+		fprintf(f, "\n");
+		std::fflush(f);
+		std::fclose(f);
+	}
+
+	static bool contains_legacy_d3dcompiler(const wchar_t* s)
+	{
+		if (!s)
+			return false;
+
+		const wchar_t needle[] = L"d3dcompiler_46";
+		const int nlen = 14;
+
+		for (const wchar_t* p = s; *p; ++p)
+		{
+			int i = 0;
+			while (i < nlen)
+			{
+				wchar_t a = p[i];
+				wchar_t b = needle[i];
+				if (a >= L'A' && a <= L'Z')
+					a += (L'a' - L'A');
+				if (a != b)
+					break;
+				++i;
+			}
+			if (i == nlen)
+				return true;
+		}
+		return false;
+	}
+
+	static HMODULE WINAPI hkLoadLibraryExW(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags)
+	{
+		if (contains_legacy_d3dcompiler(lpLibFileName))
+		{
+			InterlockedIncrement(&d3dc_block_count);
+			OutputDebugStringA("[T7Patch] blocked d3dcompiler_46.dll load (legacy shader compiler stutter fix)\n");
+
+			// [LOCAL] Verification log: the user checks this file to confirm the
+			// block actually fires in-game, no DebugView required.
+			d3dc_block_write_log("block #%d: \"%ls\" (flags=0x%X)",
+				(int)d3dc_block_count, lpLibFileName, dwFlags);
+
+			SetLastError(ERROR_MOD_NOT_FOUND);
+			return NULL; // engine falls back to D3DCompiler_47
+		}
+		return fpLoadLibraryExW(lpLibFileName, hFile, dwFlags);
+	}
+
+	void InstallD3DCompilerBlock()
+	{
+		// Idempotent: the early DllMain thread installs this hook first, and
+		// RunPatching() calls in again later.  Running the install twice used
+		// to log a misleading "install FAILED: rc=3" (MH_ERROR_ALREADY_CREATED)
+		// on the second call - bail out quietly instead.
+		static volatile LONG already_installed = 0;
+		if (InterlockedCompareExchange(&already_installed, 1, 0) != 0)
+		{
+			OutputDebugStringA("[T7Patch] d3dcompiler_46 block already armed\n");
+			return;
+		}
+
+		HMODULE k32 = GetModuleHandleA("kernel32.dll");
+		void* target = k32 ? (void*)GetProcAddress(k32, "LoadLibraryExW") : nullptr;
+		if (!target)
+		{
+			OutputDebugStringA("[T7Patch] LoadLibraryExW not found - d3dcompiler block NOT installed\n");
+			d3dc_block_write_log("install FAILED: LoadLibraryExW not found");
+			return;
+		}
+
+		// The game loads the patch during process startup (static import of
+		// d3d11.dll), so this may run before RunPatching() - make sure MinHook
+		// is initialised here too.  A later MH_Initialize() inside RunPatching()
+		// simply returns MH_ERROR_ALREADY_INITIALIZED and is harmless.
+		MH_STATUS init = MH_Initialize();
+		if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED)
+		{
+			d3dc_block_write_log("install FAILED: MH_Initialize rc=%d", (int)init);
+			return;
+		}
+
+		MH_STATUS rc = MH_CreateHook(target, (LPVOID)&hkLoadLibraryExW, (LPVOID*)&fpLoadLibraryExW);
+		if (rc == MH_OK)
+		{
+			MH_EnableHook(target);
+			OutputDebugStringA("[T7Patch] d3dcompiler_46 block installed\n");
+			d3dc_block_write_log("block armed (hook installed on LoadLibraryExW)");
+		}
+		else
+		{
+			OutputDebugStringA("[T7Patch] MH_CreateHook(LoadLibraryExW) failed - d3dcompiler block NOT installed\n");
+			d3dc_block_write_log("install FAILED: MH_CreateHook rc=%d", (int)rc);
+		}
 	}
 
 }
