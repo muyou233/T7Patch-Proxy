@@ -167,6 +167,15 @@ void t7patch_load_config_early();
 bool t7patch_block_d3dcompiler46_enabled();
 int t7patch_menu_key();          // virtual-key code that toggles the overlay (default VK_INSERT)
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
+void t7patch_config_set_block46(bool enable); // menu-side 46 switch (memory)
+void t7patch_config_save();                   // persist config + apply live settings
+// [LOCAL] Field accessors for the overlay menu's settings panel.
+const char* t7patch_cfg_playername();
+void t7patch_cfg_set_playername(const char* v);
+bool t7patch_cfg_friends_only();
+void t7patch_cfg_set_friends_only(bool v);
+const char* t7patch_cfg_network_password();
+void t7patch_cfg_set_network_password(const char* v);
 
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")

@@ -18,6 +18,7 @@
 #include <dxgi1_2.h> // IDXGIFactory2 / CreateSwapChainForHwnd live here, not in dxgi.h
 #include <dxgi1_4.h> // for future-proofing of factory interface queries
 #include "overlay.h"
+#include "Hooks.h" // [LOCAL] 46-block runtime toggle + interception counter
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 #include "imgui/backends/imgui_impl_win32.h"
@@ -38,6 +39,7 @@ namespace
 
     bool g_imguiReady = false;
     bool g_menuOpen = false;
+    bool g_mainMenuReached = false; // Insert is ignored until the main menu is up
     bool g_wndProcHooked = false;
     WNDPROC g_origWndProc = nullptr;
     void* g_origPresent = nullptr;
@@ -46,6 +48,20 @@ namespace
     void** g_patchedFactorySlot = nullptr;
     void* g_origFactoryCreateSwapChainForHwnd = nullptr;
     void** g_patchedFactoryForHwndSlot = nullptr;
+
+    // [LOCAL] imgui.ini target.  io.IniFilename keeps the pointer we give it,
+    // so the buffer must be static and outlive ImGui.  Absolute path on
+    // purpose: a relative one silently depends on the process working dir
+    // (which is why a stray imgui.ini once appeared in the game root).
+    char g_imguiIniPath[MAX_PATH] = {};
+
+    // [LOCAL] Menu edit buffers.  Refreshed from the config every time the
+    // menu transitions from closed to open, edited locally, then committed by
+    // each row's own Save button (checkboxes apply instantly instead).
+    char g_playerNameBuf[16] = {};
+    char g_passwordBuf[1024] = {};
+    bool g_editBufsLoaded = false;
+    const ULONGLONG g_sessionStart = GetTickCount64();
 
     // IDXGISwapChain vtable: IUnknown(0-2), IDXGIObject(3-5),
     // IDXGIDeviceSubObject(6), GetDevice(7), Present(8).
@@ -79,26 +95,115 @@ namespace
 
     LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags);
+    void LoadBackgroundTextureLocked(); // [LOCAL] defined further below
 
     // -----------------------------------------------------------------
-    //  Menu drawing (Phase 1 skeleton)
+    //  Menu drawing (card layout: one bordered card per section, drawn over
+    //  the key-art background; title bar kept, no collapsibles)
     // -----------------------------------------------------------------
+
+    // Card helpers: a semi-transparent child so the artwork shows through
+    // while text stays readable.  AutoResizeY keeps each card hugging its
+    // content instead of stretching.
+    void BeginCard(const char* title)
+    {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(0, 0, 0, 150));
+        ImGui::BeginChild(title, ImVec2(0.0f, 0.0f),
+            ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
+        ImGui::TextUnformatted(title);
+        ImGui::Separator();
+    }
+
+    void EndCard()
+    {
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+        ImGui::Spacing();
+    }
+
     void DrawMenu()
     {
-        ImGui::SetNextWindowSize(ImVec2(430.0f, 260.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin("T7Patch 3.07", &g_menuOpen))
+        // Refresh the text edit buffers once per menu-open, so in-game edits
+        // and manual conf edits never fight each other.  (The friends-only
+        // checkbox reads/writes the config directly - no buffer involved.)
+        if (!g_editBufsLoaded)
+        {
+            strncpy_s(g_playerNameBuf, sizeof(g_playerNameBuf),
+                t7patch_cfg_playername(), _TRUNCATE);
+            strncpy_s(g_passwordBuf, sizeof(g_passwordBuf),
+                t7patch_cfg_network_password(), _TRUNCATE);
+            g_editBufsLoaded = true;
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(480.0f, 430.0f), ImGuiCond_FirstUseEver);
+        // [LOCAL] NoCollapse: the window must not be collapsible into its
+        // title bar (the "▼" arrow) - title stays, content always visible.
+        if (!ImGui::Begin("T7Patch 3.07", &g_menuOpen, ImGuiWindowFlags_NoCollapse))
         {
             ImGui::End();
             return;
         }
 
-        ImGui::Text("Overlay online.");
-        ImGui::TextDisabled("Press Insert (configurable) to toggle this window.");
-        ImGui::Separator();
+        BeginCard("Status");
+        {
+            const ULONGLONG upSec = (GetTickCount64() - g_sessionStart) / 1000ULL;
+            ImGui::Text("Session uptime: %02u:%02u:%02u",
+                (unsigned)(upSec / 3600), (unsigned)((upSec / 60) % 60), (unsigned)(upSec % 60));
+            ImGui::Text("d3dcompiler_46 interceptions this session: %d",
+                hooks::GetD3DCompilerBlockCount());
+        }
+        EndCard();
 
-        // Phase 2: wire the real config toggles in here.
-        ImGui::TextDisabled("Settings integration: next phase");
+        BeginCard("Toggles");
+        {
+            bool block46 = hooks::IsD3DCompilerBlockEnabled();
+            if (ImGui::Checkbox("Block legacy d3dcompiler_46.dll (stutter fix)", &block46))
+                hooks::SetD3DCompilerBlock(block46);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Intercepts the old shader compiler in-process.\n"
+                    "Saved to t7patch.conf, survives restarts.");
+        }
+        EndCard();
 
+        BeginCard("Settings");
+        {
+            // [LOCAL] Label on the LEFT of each field (ImGui's InputText puts
+            // its label on the right by default; use a hidden "##id" label and
+            // draw our own text first).  One Save button per row.
+            ImGui::Text("Player name");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("##playername", g_playerNameBuf, sizeof(g_playerNameBuf));
+            ImGui::SameLine();
+            if (ImGui::Button("Save##playername"))
+            {
+                t7patch_cfg_set_playername(g_playerNameBuf);
+                t7patch_config_save();
+            }
+
+            bool friendsOnly = t7patch_cfg_friends_only();
+            if (ImGui::Checkbox("Friends only (applies instantly)", &friendsOnly))
+            {
+                t7patch_cfg_set_friends_only(friendsOnly);
+                t7patch_config_save();
+            }
+
+            ImGui::Text("Room password");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(190.0f);
+            ImGui::InputText("##password", g_passwordBuf, sizeof(g_passwordBuf),
+                ImGuiInputTextFlags_Password);
+            ImGui::SameLine();
+            if (ImGui::Button("Save##password"))
+            {
+                t7patch_cfg_set_network_password(g_passwordBuf);
+                t7patch_config_save();
+            }
+            ImGui::TextDisabled("Text fields commit on their Save button. Checkboxes apply on click.");
+        }
+        EndCard();
+
+        ImGui::TextDisabled("Insert toggles this window (menu_key in t7patch.conf).");
         ImGui::End();
     }
 
@@ -111,13 +216,57 @@ namespace
             return false;
 
         ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        // [LOCAL] Keep imgui.ini inside T7Patch\ (window positions/sizes are
+        // remembered between launches, next to the other patch files).  Built
+        // as an absolute path from the exe location, stored in the static
+        // buffer above (ImGui keeps the pointer, it must outlive the context).
+        {
+            wchar_t exePath[MAX_PATH]{};
+            if (GetModuleFileNameW(nullptr, exePath, MAX_PATH))
+            {
+                const auto iniPath = std::filesystem::path(exePath).parent_path()
+                    / L"T7Patch" / L"imgui.ini";
+                WideCharToMultiByte(CP_UTF8, 0, iniPath.c_str(), -1,
+                    g_imguiIniPath, sizeof(g_imguiIniPath), nullptr, nullptr);
+                io.IniFilename = g_imguiIniPath;
+            }
+        }
+
+        // [LOCAL] The stock ProggyClean font has no CJK glyphs and this user
+        // runs the zh-CN config template, so load a system CJK font first and
+        // fall back to the default only if none exists.
+        {
+            bool fontLoaded = false;
+            const char* cjkFonts[] = {
+                "C:\\Windows\\Fonts\\msyh.ttc",   // Microsoft YaHei (Win8+)
+                "C:\\Windows\\Fonts\\msyh.ttf",
+                "C:\\Windows\\Fonts\\simhei.ttf", // SimHei fallback
+            };
+            for (const char* fontPath : cjkFonts)
+            {
+                if (GetFileAttributesA(fontPath) == INVALID_FILE_ATTRIBUTES)
+                    continue;
+                if (io.Fonts->AddFontFromFileTTF(fontPath, 17.0f, nullptr,
+                        io.Fonts->GetGlyphRangesChineseSimplifiedCommon()))
+                {
+                    fontLoaded = true;
+                    break;
+                }
+            }
+            if (!fontLoaded)
+                io.Fonts->AddFontDefault();
+        }
+
         if (!ImGui_ImplWin32_Init(g_hwnd))
             return false;
         if (!ImGui_ImplDX11_Init(g_device, g_context))
             return false;
 
         g_imguiReady = true;
-        g_menuOpen = t7patch_menu_auto_open(); // conf switch, default off
+        // [LOCAL] menu_auto_open fires later, on the first DLC ownership
+        // query (main menu reached) - see NotifyMainMenuReached().
+        g_menuOpen = false;
         return true;
     }
 
@@ -184,6 +333,7 @@ namespace
         overlay_log(msg);
     }
 
+    // Caller must hold g_overlayMutex.
     void OnSwapChainCaptured(IDXGISwapChain* swapChain)
     {
         std::lock_guard<std::mutex> lock(g_overlayMutex);
@@ -246,10 +396,20 @@ namespace
     {
         // Menu hotkey.  WM_KEYDOWN repeat (bit 30) is ignored so holding the
         // key does not strobe the menu.
+        // [LOCAL] Hotkey is gated on the main menu: during the intro movies
+        // and the connect screen the game engine is still mid-init, and
+        // opening the overlay there is both useless and a crash risk.
         if (msg == WM_KEYDOWN && wParam == (WPARAM)t7patch_menu_key() && !(lParam & 0x40000000))
         {
-            g_menuOpen = !g_menuOpen;
-            overlay_log(g_menuOpen ? "menu OPEN (hotkey)" : "menu CLOSE (hotkey)");
+            if (!g_mainMenuReached)
+            {
+                overlay_log("hotkey ignored (main menu not reached yet)");
+            }
+            else
+            {
+                g_menuOpen = !g_menuOpen;
+                overlay_log(g_menuOpen ? "menu OPEN (hotkey)" : "menu CLOSE (hotkey)");
+            }
         }
 
         if (g_imguiReady)
@@ -264,6 +424,25 @@ namespace
 
 namespace overlay
 {
+    void NotifyMainMenuReached()
+    {
+        static bool notified = false;
+        if (notified)
+            return;
+        notified = true;
+        g_mainMenuReached = true;
+
+        if (t7patch_menu_auto_open())
+        {
+            g_menuOpen = true;
+            overlay_log("menu AUTO-OPENED (main menu reached, menu_auto_open=1)");
+        }
+        else
+        {
+            overlay_log("main menu reached (Insert now armed)");
+        }
+    }
+
     void OnDeviceCreated(void* device, void* immediateContext)
     {
         std::lock_guard<std::mutex> lock(g_overlayMutex);

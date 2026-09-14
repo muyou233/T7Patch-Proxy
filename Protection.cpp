@@ -1,4 +1,5 @@
 #include "Protection.h"
+#include "overlay.h" // [LOCAL] NotifyMainMenuReached (menu_auto_open timing)
 
 #include <mutex> // [LOCAL] guards for friends_set / dlcContent (see below)
 
@@ -376,6 +377,11 @@ std::mutex dlc_content_mutex;
 
 bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
 {
+    // [LOCAL] First ownership query = the main menu is building its mode
+    // buttons.  Signal the overlay so menu_auto_open fires here instead of
+    // on the startup screen.
+    overlay::NotifyMainMenuReached();
+
     #if SPOOF_UNLOCK_ALL
         return IsModeContentFilePresent(itemid); // [LOCAL] spoof stays plausible too
     #endif
@@ -716,7 +722,7 @@ struct patch_config
 
         outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
         outfile << "block_d3dcompiler46=" << block_d3dcompiler46 << std::endl;
-        outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）；1/0：启动时自动打开菜单" << std::endl;
+        outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）；1：进入主菜单后自动打开菜单" << std::endl;
         outfile << "menu_key=" << menu_key << std::endl;
         outfile << "menu_auto_open=" << menu_auto_open << std::endl;
 
@@ -825,6 +831,8 @@ struct patch_config
 
 patch_config user_config;
 
+void apply_settings(); // [LOCAL] forward declaration: defined below this block
+
 // [LOCAL] Config helpers exposed to dllmain.cpp / Hooks.cpp.  The 46 block is
 // installed long before apply_settings() runs, so it needs its own read-only
 // config load (no engine calls - safe this early) plus a simple getter.
@@ -849,6 +857,44 @@ int t7patch_menu_key()
 bool t7patch_menu_auto_open()
 {
     return user_config.menu_auto_open != 0;
+}
+
+// [LOCAL] Called by the overlay menu: flips the 46 switch in memory.
+void t7patch_config_set_block46(bool enable)
+{
+    user_config.block_d3dcompiler46 = enable ? 1 : 0;
+}
+
+// [LOCAL] Persist the current config to disk AND apply the live settings, so
+// menu edits (playername, friends-only, ...) take effect immediately.
+void t7patch_config_save()
+{
+    user_config.saveto(PATCH_CONFIG_LOCATION);
+    apply_settings();
+}
+
+// [LOCAL] Field-level accessors for the overlay menu (patch_config lives in
+// this file, so the menu talks to it through these narrow helpers).
+const char* t7patch_cfg_playername() { return user_config.playername; }
+void t7patch_cfg_set_playername(const char* v)
+{
+    strncpy_s(user_config.playername, sizeof(user_config.playername), v, _TRUNCATE);
+}
+bool t7patch_cfg_friends_only() { return user_config.isfriendsonly != 0; }
+void t7patch_cfg_set_friends_only(bool v) { user_config.isfriendsonly = v ? 1 : 0; }
+const char* t7patch_cfg_network_password() { return user_config.networkpassword; }
+void t7patch_cfg_set_network_password(const char* v)
+{
+    if (user_config.networkpassword)
+    {
+        free(user_config.networkpassword);
+        user_config.networkpassword = NULL;
+    }
+    size_t len = strlen(v);
+    if (len > 1023)
+        len = 1023;
+    user_config.networkpassword = (char*)malloc(len + 1);
+    strcpy_s(user_config.networkpassword, len + 1, v);
 }
 
 void apply_settings()

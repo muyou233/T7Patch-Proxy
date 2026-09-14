@@ -16,4 +16,11 @@ namespace overlay
     // Called from proxy/Proxy.cpp after a successful
     // D3D11CreateDeviceAndSwapChain.
     void OnSwapChainCreated(void* swapChain, void* device, void* immediateContext);
+
+    // [LOCAL] Called by Protection.cpp on the first DLC ownership query - the
+    // main menu builds its mode buttons by asking exactly this, so reaching
+    // here means the main menu is up.  If menu_auto_open is set, the overlay
+    // opens now (instead of at device-creation time, which is still on the
+    // startup screen).
+    void NotifyMainMenuReached();
 }

@@ -1126,27 +1126,22 @@ namespace hooks {
 		return fpLoadLibraryExW(lpLibFileName, hFile, dwFlags);
 	}
 
+	// [LOCAL] Dynamic 46-block state for the overlay menu:
+	//   created - the MinHook entry exists (created once, early)
+	//   enabled - calls actually land in hkLoadLibraryExW right now
+	//   target  - kernel32!LoadLibraryExW (fixed for the process lifetime)
+	static volatile LONG g_block46Created = 0;
+	static volatile LONG g_block46Enabled = 0;
+	static void* g_block46Target = nullptr;
+
 	void InstallD3DCompilerBlock()
 	{
-		// Idempotent: the early DllMain thread installs this hook first, and
-		// RunPatching() calls in again later.  Running the install twice used
-		// to log a misleading "install FAILED: rc=3" (MH_ERROR_ALREADY_CREATED)
-		// on the second call - bail out quietly instead.
-		static volatile LONG already_installed = 0;
-		if (InterlockedCompareExchange(&already_installed, 1, 0) != 0)
-		{
-			OutputDebugStringA("[T7Patch] d3dcompiler_46 block already armed\n");
+		// Create the hook once.  Whether it starts ENABLED follows the config
+		// (block_d3dcompiler46, default 1); the overlay menu can flip it later
+		// at runtime without re-hooking.
+		static volatile LONG create_started = 0;
+		if (InterlockedCompareExchange(&create_started, 1, 0) != 0)
 			return;
-		}
-
-		// [LOCAL] Config switch (t7patch.conf -> block_d3dcompiler46, default 1).
-		// Evaluated at arm time; changing it needs a game restart.
-		if (!t7patch_block_d3dcompiler46_enabled())
-		{
-			OutputDebugStringA("[T7Patch] d3dcompiler_46 block disabled by config\n");
-			d3dc_block_write_log("block disabled by config (block_d3dcompiler46=0)");
-			return;
-		}
 
 		HMODULE k32 = GetModuleHandleA("kernel32.dll");
 		void* target = k32 ? (void*)GetProcAddress(k32, "LoadLibraryExW") : nullptr;
@@ -1156,6 +1151,7 @@ namespace hooks {
 			d3dc_block_write_log("install FAILED: LoadLibraryExW not found");
 			return;
 		}
+		g_block46Target = target;
 
 		// The game loads the patch during process startup (static import of
 		// d3d11.dll), so this may run before RunPatching() - make sure MinHook
@@ -1169,17 +1165,57 @@ namespace hooks {
 		}
 
 		MH_STATUS rc = MH_CreateHook(target, (LPVOID)&hkLoadLibraryExW, (LPVOID*)&fpLoadLibraryExW);
-		if (rc == MH_OK)
+		if (rc != MH_OK)
+		{
+			OutputDebugStringA("[T7Patch] MH_CreateHook(LoadLibraryExW) failed - d3dcompiler block NOT installed\n");
+			d3dc_block_write_log("install FAILED: MH_CreateHook rc=%d", (int)rc);
+			return;
+		}
+		g_block46Created = 1;
+
+		if (t7patch_block_d3dcompiler46_enabled())
 		{
 			MH_EnableHook(target);
+			g_block46Enabled = 1;
 			OutputDebugStringA("[T7Patch] d3dcompiler_46 block installed\n");
 			d3dc_block_write_log("block armed (hook installed on LoadLibraryExW)");
 		}
 		else
 		{
-			OutputDebugStringA("[T7Patch] MH_CreateHook(LoadLibraryExW) failed - d3dcompiler block NOT installed\n");
-			d3dc_block_write_log("install FAILED: MH_CreateHook rc=%d", (int)rc);
+			g_block46Enabled = 0;
+			d3dc_block_write_log("hook created but disabled by config (block_d3dcompiler46=0)");
 		}
+	}
+
+	// [LOCAL] Menu-side runtime toggle.  MinHook keeps the hook registered;
+	// Enable/Disable only flip whether calls land in hkLoadLibraryExW.  The
+	// config file is updated too, so the choice survives a restart.
+	void SetD3DCompilerBlock(bool enable)
+	{
+		if (!g_block46Created || enable == (g_block46Enabled != 0))
+			return;
+
+		MH_STATUS rc = enable ? MH_EnableHook(g_block46Target) : MH_DisableHook(g_block46Target);
+		if (rc != MH_OK)
+		{
+			d3dc_block_write_log("toggle FAILED rc=%d", (int)rc);
+			return;
+		}
+
+		g_block46Enabled = enable ? 1 : 0;
+		d3dc_block_write_log(enable ? "block ENABLED from menu" : "block DISABLED from menu");
+		t7patch_config_set_block46(enable);
+		t7patch_config_save();
+	}
+
+	bool IsD3DCompilerBlockEnabled()
+	{
+		return g_block46Enabled != 0;
+	}
+
+	int GetD3DCompilerBlockCount()
+	{
+		return d3dc_block_count;
 	}
 
 }

@@ -14,4 +14,11 @@ namespace hooks {
 	// compilation through the old runtime compiler.  (User-verified fix.)
 	extern void InstallD3DCompilerBlock();
 
+	// [LOCAL] Runtime toggle for the overlay menu.  The hook is created once
+	// at startup; these flip whether calls land in it (MinHook enable/disable,
+	// no re-hooking).  SetD3DCompilerBlock also keeps t7patch.conf in sync.
+	extern void SetD3DCompilerBlock(bool enable);
+	extern bool IsD3DCompilerBlockEnabled();
+	extern int  GetD3DCompilerBlockCount(); // interceptions this session
+
 }
