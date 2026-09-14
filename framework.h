@@ -166,10 +166,12 @@ inline void t7patch_ensure_data_dir()
 void t7patch_load_config_early();
 bool t7patch_block_d3dcompiler46_enabled();
 int t7patch_menu_key();          // virtual-key code that toggles the overlay (default VK_INSERT)
+int t7patch_menu_gate();         // 1 = default gate (online sign-in + offline fallback), 0 = strict
 int t7patch_cfg_menu_lang();     // overlay language: 1 = Chinese (default), 0 = English
 void t7patch_cfg_set_menu_lang(int value);
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
+void t7patch_cfg_set_menu_auto_open(bool v); // menu-side auto-open switch
 void t7patch_config_set_block46(bool enable); // menu-side 46 switch (memory)
 void t7patch_config_save();                   // persist config + apply live settings
 // [LOCAL] Field accessors for the overlay menu's settings panel.

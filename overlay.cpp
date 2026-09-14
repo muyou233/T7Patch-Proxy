@@ -19,7 +19,8 @@
 #include <dxgi.h>
 #include <dxgi1_2.h> // IDXGIFactory2 / CreateSwapChainForHwnd live here, not in dxgi.h
 #include "overlay.h"
-#include "Hooks.h" // [LOCAL] 46-block runtime toggle + interception counter
+#include "Hooks.h"       // [LOCAL] 46-block runtime toggle + interception counter
+#include "t7patch_log.h" // [LOCAL] the patch's single runtime log
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 #include "imgui/backends/imgui_impl_win32.h"
@@ -87,8 +88,18 @@ namespace
     // main-menu notify), from the WndProc thread (hotkey) and read every
     // frame by the render thread - atomics keep that honest.
     std::atomic<bool> g_imguiReady{ false };
+    // [LOCAL] Full ImGui frames to run after init even with the menu closed
+    // (cooks the CJK font atlas off the user's first hotkey press).  Only
+    // touched by the render thread.
+    int g_warmupFrames = 0;
     std::atomic<bool> g_menuOpen{ false };
     std::atomic<bool> g_mainMenuReached{ false }; // Insert is ignored until the main menu is up
+    // [LOCAL] "hotkey ignored" is logged once per session (see OverlayWndProc);
+    // only the window thread touches this.
+    bool g_hotkeyIgnoredLogged = false;
+    // [LOCAL] When the user dismissed the "press ENTER" title screen (GetTickCount64
+    // timestamp, 0 = not yet).  See OverlayWndProc - this is the gate signal.
+    std::atomic<unsigned long long> g_titleDismissedMs{ 0 };
     bool g_wndProcHooked = false;
     WNDPROC g_origWndProc = nullptr;
     void* g_origPresent = nullptr;
@@ -125,20 +136,10 @@ namespace
     // in its own log the user can read after the fact.
     void overlay_log(const char* msg)
     {
-        wchar_t exePath[MAX_PATH]{};
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
-            return;
-        const auto path = std::filesystem::path(exePath).parent_path()
-            / L"T7Patch" / L"t7patch_overlay.log";
-
-        FILE* f = _wfopen(path.c_str(), L"a+");
-        if (!f)
-            return;
-        SYSTEMTIME st{};
-        GetLocalTime(&st);
-        fprintf(f, "[%02u:%02u:%02u.%03u] %s\n",
-            st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, msg);
-        fclose(f);
+        // [LOCAL] The overlay shares the patch's single log (t7patch_log.h),
+        // tagged "overlay" - it used to have a file of its own, which also had
+        // no size cap at all.
+        t7log::Append("overlay", msg);
     }
 
     LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -190,6 +191,8 @@ namespace
         const char* hint;
         const char* blockShaderTip;
         const char* friendsOnlyTip;
+        const char* autoOpen;
+        const char* autoOpenTip;
     };
 
     constexpr MenuText kTextZh = {
@@ -198,12 +201,15 @@ namespace
         "仅好友可加入", "屏蔽旧着色器编译器",
         "运行时长：%02u:%02u:%02u",
         "本次拦截旧着色器调用：%d 次",
-        "语言", "呼出按键", "请按下新按键…",
+        "语言", "呼出按键", "请按下新按键…（ESC 取消）",
         "按 %s 呼出/隐藏本窗口",
         "在进程内拦截旧版 d3dcompiler_46.dll。\n"
         "修复地图加载 / 首次特效时的卡顿。\n"
         "保存到 t7patch.conf，重启后保持。",
         "仅好友可以邀请/加入你。\n"
+        "立即生效并保存到 t7patch.conf。",
+        "自动打开窗口",
+        "进入主菜单后自动打开本窗口。\n"
         "立即生效并保存到 t7patch.conf。"
     };
     constexpr MenuText kTextEn = {
@@ -212,12 +218,15 @@ namespace
         "Friends only", "Block legacy shader compiler",
         "Session uptime: %02u:%02u:%02u",
         "d3dcompiler_46 interceptions this session: %d",
-        "Language", "Hotkey", "Press any key...",
+        "Language", "Hotkey", "Press any key... (ESC cancels)",
         "Press %s to toggle this window",
         "Intercepts the legacy d3dcompiler_46.dll in-process.\n"
         "Fixes the map-load / first-effect hitching.\n"
         "Saved to t7patch.conf, survives restarts.",
         "Only friends can invite/join you.\n"
+        "Applies instantly and saves to t7patch.conf.",
+        "Auto-open in main menu",
+        "Opens this window automatically once the main menu is up.\n"
         "Applies instantly and saves to t7patch.conf."
     };
 
@@ -350,7 +359,7 @@ namespace
         // the constraints lock out edges-dragging, and the NoScrollbar flags
         // keep the chrome clean.  Width was trimmed ~14% (fields do not need
         // that much room); height has slack so nothing gets clipped.
-        const ImVec2 kPanelSize(395.0f, 415.0f);
+        const ImVec2 kPanelSize(395.0f, 440.0f);
         ImGui::SetNextWindowSize(kPanelSize, ImGuiCond_Always);
         ImGui::SetNextWindowSizeConstraints(kPanelSize, kPanelSize);
         bool menuOpen = g_menuOpen.load();
@@ -415,15 +424,6 @@ namespace
 
         BeginCard(L()->toggles);
         {
-            bool block46 = hooks::IsD3DCompilerBlockEnabled();
-            if (SolidCheckbox(L()->blockShader, &block46))
-                hooks::SetD3DCompilerBlock(block46);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", L()->blockShaderTip);
-
-            // [LOCAL] All switches live together in this card - friends-only
-            // used to sit in the settings table and looked out of place
-            // between two text fields.
             bool friendsOnly = t7patch_cfg_friends_only();
             if (SolidCheckbox(L()->friendsOnly, &friendsOnly))
             {
@@ -432,6 +432,25 @@ namespace
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", L()->friendsOnlyTip);
+
+            bool block46 = hooks::IsD3DCompilerBlockEnabled();
+            if (SolidCheckbox(L()->blockShader, &block46))
+                hooks::SetD3DCompilerBlock(block46);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", L()->blockShaderTip);
+
+            // [LOCAL] Auto-open: open the window by itself once the main menu
+            // is reached (same signal as the hotkey gate).  Only takes effect
+            // on the NEXT run after a change - the auto-open decision for this
+            // session was already made when the main menu came up.
+            bool autoOpen = t7patch_menu_auto_open();
+            if (SolidCheckbox(L()->autoOpen, &autoOpen))
+            {
+                t7patch_cfg_set_menu_auto_open(autoOpen);
+                t7patch_config_save();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", L()->autoOpenTip);
         }
         EndCard();
 
@@ -456,20 +475,30 @@ namespace
             // Hotkey: click the button, then press the new key (ESC cancels).
             ImGui::TextUnformatted(L()->hotkey);
             ImGui::SameLine(100.0f);
-            if (g_capturingHotkey.load())
-            {
-                ImGui::TextColored(kAccent, "%s", L()->pressAnyKey);
-            }
-            else if (ImGui::Button(VkName(t7patch_menu_key()), ImVec2(90.0f, 0.0f)))
-            {
+            // [LOCAL] While waiting for the new key the button STAYS - same size,
+            // stable ID - and only its label becomes "...".  It used to be
+            // replaced by a text label, which changed the column width and
+            // dragged the whole card (and its border) along with it.
+            const bool capturingKey = g_capturingHotkey.load();
+            char hotkeyBtn[64]{};
+            snprintf(hotkeyBtn, sizeof(hotkeyBtn), "%s##hotkeybtn",
+                capturingKey ? "..." : VkName(t7patch_menu_key()));
+            if (ImGui::Button(hotkeyBtn, ImVec2(90.0f, 0.0f)) && !capturingKey)
                 g_capturingHotkey = true;
-            }
+            if (capturingKey && ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", L()->pressAnyKey);
         }
         EndCard();
 
         {
-            char hint[128]{};
-            snprintf(hint, sizeof(hint), L()->hint, VkName(t7patch_menu_key()));
+            // Bottom hint: while capturing the key it becomes the "press a key"
+            // prompt (this line sits outside the cards, so changing its text
+            // cannot resize anything).
+            char hint[160]{};
+            if (g_capturingHotkey.load())
+                snprintf(hint, sizeof(hint), "%s", L()->pressAnyKey);
+            else
+                snprintf(hint, sizeof(hint), L()->hint, VkName(t7patch_menu_key()));
             ImGui::TextDisabled("%s", hint);
         }
 
@@ -550,6 +579,11 @@ namespace
         // [LOCAL] menu_auto_open fires later, on the first DLC ownership
         // query (main menu reached) - see NotifyMainMenuReached().
         g_menuOpen = false;
+        // [LOCAL] Present-frame warm-up: run this many full ImGui frames even
+        // while the menu is closed, so the CJK font atlas (~2500 glyphs) is
+        // rasterised during the intro movie instead of on the first Insert
+        // press (which would show as a visible hitch).
+        g_warmupFrames = 2;
         return true;
     }
 
@@ -631,8 +665,18 @@ namespace
     // -----------------------------------------------------------------
     HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags)
     {
-        if (g_imguiReady)
+        // [LOCAL] Menu-closed fast path: skip the entire ImGui frame.  A cooked
+        // but empty frame still costs the DX11 backend's state save/restore on
+        // every present (tens of microseconds per frame, ~0.5-1% at 144 FPS).
+        // The warm-up frames run right after init so the font atlas is built
+        // during the intro movie, not on the user's first hotkey press.  The
+        // next NewFrame re-queries the display size, so resuming is seamless.
+        const bool runFrame = g_menuOpen.load() || g_warmupFrames > 0;
+        if (g_imguiReady.load() && runFrame)
         {
+            if (g_warmupFrames > 0)
+                --g_warmupFrames;
+
             ImGui_ImplDX11_NewFrame();
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
@@ -710,6 +754,26 @@ namespace
             return TRUE;
         }
 
+        // [LOCAL] Gate signal: the front-end opens on a "press ENTER" title
+        // screen, and nothing in the game's state separates that screen from the
+        // main menu (seven polled candidates plus the UI-model marker were all
+        // measured and failed - the marker turned out to fire on a fixed
+        // front-end timer while the title screen is still up).  What DOES mark
+        // the transition is the user leaving that screen, and we already see the
+        // window's input: note the dismissing ENTER or click and let
+        // Protection.cpp arm the hotkey a moment later.
+        if (!g_mainMenuReached.load() && g_titleDismissedMs.load() == 0)
+        {
+            const bool dismissKey = (msg == WM_KEYDOWN && wParam == VK_RETURN);
+            const bool dismissClick = (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN);
+            if (dismissKey || dismissClick)
+            {
+                g_titleDismissedMs = GetTickCount64();
+                overlay_log(dismissKey ? "title screen dismissed (ENTER)"
+                                       : "title screen dismissed (click)");
+            }
+        }
+
         // Menu hotkey.  WM_KEYDOWN repeat (bit 30) is ignored so holding the
         // key does not strobe the menu.
         // [LOCAL] Hotkey is gated on the main menu: during the intro movies
@@ -719,14 +783,24 @@ namespace
         {
             if (!g_mainMenuReached)
             {
-                overlay_log("hotkey ignored (main menu not reached yet)");
+                // [LOCAL] Logged once per session: the player usually taps the
+                // key a few times while the gate is still shut, and repeating
+                // the same line adds nothing to the log.
+                if (!g_hotkeyIgnoredLogged)
+                {
+                    g_hotkeyIgnoredLogged = true;
+                    overlay_log("hotkey ignored (main menu not reached yet)");
+                }
             }
             else
             {
+                // [LOCAL] Menu open/close is not logged on purpose: it is pure
+                // UI interaction, and one line per key press would drown the
+                // handful of lines that actually matter (start-up, gate, 46
+                // block).
                 g_menuOpen = !g_menuOpen.load();
                 if (g_menuOpen.load())
                     g_editBufsLoaded = false; // re-read the text buffers from the conf
-                overlay_log(g_menuOpen.load() ? "menu OPEN (hotkey)" : "menu CLOSE (hotkey)");
             }
         }
 
@@ -764,6 +838,11 @@ namespace overlay
     void DebugLog(const char* msg)
     {
         overlay_log(msg);
+    }
+
+    unsigned long long TitleScreenDismissedMs()
+    {
+        return g_titleDismissedMs.load();
     }
 
     void NotifyMainMenuReached()

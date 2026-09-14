@@ -37,14 +37,12 @@
 // =====================================================================
 
 #include "framework.h"
-#include "overlay.h" // [LOCAL] in-game ImGui overlay
+#include "overlay.h"      // [LOCAL] in-game ImGui overlay
+#include "t7patch_log.h"  // [LOCAL] the patch's single runtime log
 
 #include <atomic>
 #include <cstdio>
 #include <cwchar>
-
-// [LOCAL] Same folder as t7patch.conf / crashes.log.
-#define PROXY_LOG_FILE T7PATCH_DATA_DIR "\\t7patch_proxy.log"
 
 // ---------------------------------------------------------------------
 //  Provided by proxy/thunks.asm
@@ -61,7 +59,7 @@ namespace
     // =================================================================
     //  Tuning knobs
     // =================================================================
-    //  Written to t7patch_proxy.log next to the DLL so the start-up
+    //  Written to the patch's log (T7Patch\t7patch.log) so the start-up
     //  sequence can be verified on a first run.
     constexpr bool kWriteLog = true;
 
@@ -189,13 +187,14 @@ namespace
     // =================================================================
     //  Logging (best effort - never blocks or fails the game start-up)
     //
-    //  Lands in the same "T7Patch" folder as t7patch.conf.  DllMain creates
-    //  that folder before any of this can run.
+    //  Everything lands in the patch's single log, T7Patch\t7patch.log (see
+    //  t7patch_log.h), tagged "proxy".  DllMain creates that folder before any
+    //  of this can run.
     //
     //  DllMain runs with the loader lock held, and opening a file there is not
     //  allowed.  Messages logged during that window are therefore buffered and
-    //  written out by the first message after the lock is released, keeping
-    //  their original timestamps.
+    //  written out by the first message after the lock is released (their
+    //  timestamp is the flush moment, a few milliseconds later in practice).
     // =================================================================
     constexpr int kMaxPendingLogs = 4;
     constexpr int kLogLineSize = 320;
@@ -204,56 +203,24 @@ namespace
     int g_pendingLogCount = 0;
     std::atomic<bool> g_loaderLockHeld{ false };
 
-    void FormatLogLine(char* out, size_t outSize, const char* text)
-    {
-        SYSTEMTIME st{};
-        GetLocalTime(&st);
-        // _snprintf_s with _TRUNCATE rather than sprintf_s: an over-long
-        // message must not trip the invalid-parameter handler, which would
-        // abort the game process.
-        _snprintf_s(out, outSize, _TRUNCATE, "[%02u:%02u:%02u.%03u] %s",
-            st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, text);
-    }
-
     void ProxyLog(const char* text)
     {
         OutputDebugStringA(text);
 
         if (!kWriteLog) return;
 
-        char line[kLogLineSize] = { 0 };
-        FormatLogLine(line, kLogLineSize, text);
-
         if (g_loaderLockHeld.load(std::memory_order_acquire))
         {
             if (g_pendingLogCount < kMaxPendingLogs)
-                strcpy_s(g_pendingLogs[g_pendingLogCount++], line);
+                strcpy_s(g_pendingLogs[g_pendingLogCount++], text);
             return;
         }
 
-        // [LOCAL] Cap the log size: once t7patch_proxy.log grows past 24 KB,
-        // rotate it to t7patch_proxy.log.old (replacing any previous .old) so
-        // the file can never grow without bound while keeping one generation
-        // of history for debugging.
-        WIN32_FILE_ATTRIBUTE_DATA logAttr = {};
-        if (GetFileAttributesExA(PROXY_LOG_FILE, GetFileExInfoStandard, &logAttr))
-        {
-            const long long logSize =
-                ((long long)logAttr.nFileSizeHigh << 32) | logAttr.nFileSizeLow;
-            if (logSize > 24 * 1024)
-                MoveFileExA(PROXY_LOG_FILE, PROXY_LOG_FILE ".old",
-                            MOVEFILE_REPLACE_EXISTING);
-        }
-
-        FILE* f = nullptr;
-        if (fopen_s(&f, PROXY_LOG_FILE, "a") != 0 || !f) return;
-
         for (int i = 0; i < g_pendingLogCount; ++i)
-            fprintf(f, "%s\n", g_pendingLogs[i]);
+            t7log::Append("proxy", g_pendingLogs[i]);
         g_pendingLogCount = 0;
 
-        fprintf(f, "%s\n", line);
-        fclose(f);
+        t7log::Append("proxy", text);
     }
 
     // =================================================================

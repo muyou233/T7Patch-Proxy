@@ -1,4 +1,5 @@
 #include "Protection.h"
+#include "Hooks.h"   // [LOCAL] EnableUiModelPathLog (UI-model path observer)
 #include "overlay.h" // [LOCAL] NotifyMainMenuReached (menu_auto_open timing)
 
 #include <mutex> // [LOCAL] guards for friends_set / dlcContent (see below)
@@ -648,6 +649,10 @@ struct patch_config
     int menu_auto_open;
     // [LOCAL] Overlay menu language: 1 = Chinese (default), 0 = English.
     int menu_lang;
+    // [LOCAL] Overlay gate: 1 = default (online main menu as soon as Live
+    // signs in, plus a front-end-uptime fallback so the offline main menu
+    // works too); 0 = strict (only arm after Live sign-in).
+    int menu_gate;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -658,8 +663,9 @@ struct patch_config
         isfriendsonly = true;
         block_d3dcompiler46 = true;
         menu_key = 45;      // VK_INSERT
-        menu_auto_open = 0; // start closed; Insert opens the menu
+        menu_auto_open = 1; // auto-open on the main menu (user default)
         menu_lang = 1;      // Chinese by default
+        menu_gate = 1;      // default gate (online + offline fallback)
         exists = false;
         modified = std::filesystem::file_time_type();
         __playername();
@@ -724,10 +730,22 @@ struct patch_config
 
         outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
         outfile << "block_d3dcompiler46=" << block_d3dcompiler46 << std::endl;
-        outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）；1：进入主菜单后自动打开菜单" << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）" << std::endl;
         outfile << "menu_key=" << menu_key << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 进入主菜单后自动打开菜单 1/0开启关闭" << std::endl;
         outfile << "menu_auto_open=" << menu_auto_open << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 菜单语言 1/0中文英文" << std::endl;
         outfile << "menu_lang=" << menu_lang << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 菜单呼出时机：1=默认（离开标题界面后可呼出，60 秒兜底）0=严格（只认离开标题界面）" << std::endl;
+        outfile << "menu_gate=" << menu_gate << std::endl;
 
         outfile.close();
         update_watcher_time(path);
@@ -820,7 +838,7 @@ struct patch_config
                 ivalread >> menu_auto_open;
                 if (ivalread.fail())
                 {
-                    menu_auto_open = 0; // default: closed at start
+                    menu_auto_open = 1; // default: auto-open (user default)
                 }
             }
             break;
@@ -831,6 +849,16 @@ struct patch_config
                 if (ivalread.fail())
                 {
                     menu_lang = 1; // default: Chinese
+                }
+            }
+            break;
+            case FNV32("menu_gate"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> menu_gate;
+                if (ivalread.fail())
+                {
+                    menu_gate = 1; // default: online sign-in + offline fallback
                 }
             }
             break;
@@ -867,6 +895,13 @@ int t7patch_menu_key()
     return user_config.menu_key;
 }
 
+// [LOCAL] Overlay gate mode: 1 = default (online sign-in, plus a front-end
+// uptime fallback so the offline main menu can open the menu too), 0 = strict.
+int t7patch_menu_gate()
+{
+    return user_config.menu_gate;
+}
+
 // [LOCAL] Overlay menu language (1 = Chinese, 0 = English).
 int t7patch_cfg_menu_lang()
 {
@@ -888,6 +923,12 @@ void t7patch_cfg_set_menu_key(int vk)
 bool t7patch_menu_auto_open()
 {
     return user_config.menu_auto_open != 0;
+}
+
+// [LOCAL] Toggle auto-open from the overlay menu.
+void t7patch_cfg_set_menu_auto_open(bool v)
+{
+    user_config.menu_auto_open = v ? 1 : 0;
 }
 
 // [LOCAL] Called by the overlay menu: flips the 46 switch in memory.
@@ -961,14 +1002,44 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     std::srand((unsigned int)time(NULL)); // [LOCAL] C4244: explicit time_t truncation
     *(__int32*)OFFSET(0x11250898) = rand();
 
-    // [LOCAL] Overlay gate probes.  Two candidates were tested live and both
-    // fire too early: s_runningUILevel already reads 1 on the "press ENTER"
-    // screen, and the DLC ownership query happens before connecting too.  The
-    // reliable signal is the Live/Demonware sign-in: it only completes when
-    // the game really reaches the online main menu.
+    // [LOCAL] Overlay gate.  Eight candidate signals were measured live on
+    // 2026-09-14.  Seven of them failed to separate the "press ENTER" screen
+    // from the real main menu:
+    //   s_runningUILevel      - 0->1 already on the "press ENTER" screen
+    //   DLC ownership query   - fires before connecting
+    //   Demonware sign-in     - completes in the background on that screen
+    //   DW_LOBBY              - gets its value at the same instant (UI 0->1)
+    //   PTR_LobbyVM           - still 0x12 on that screen, real pointer ~1 min later
+    //   s_playerData_ptr      - valid before UI 0->1
+    //   uistate[-8..+15]      - a 24-byte neighbourhood dump: only the byte of
+    //                           s_runningUILevel itself ever changes, the rest
+    //                           stays zero, so nothing there distinguishes them
+    //
+    // What finally worked is a real screen signal, found by watching the UI text
+    // the game resolves: the MAIN MENU's own labels (Campaign / Multiplayer /
+    // Zombies buttons, quick-join bar) are built at render time and appear only
+    // when that screen is up - the title screen resolves just "按ENTER开始" and
+    // the connecting screen "正在连接到在线服务器".  Hooks.cpp turns that into
+    // hooks::UiMainMenuSeen(), and the user's title-screen dismissal stays a
+    // precondition (so a pre-resolved label cannot arm early).
+    //
+    // One net remains, in case the labels never show up (an unlisted localisation
+    // or a different front-end flow): the front-end-uptime fallback after
+    // kGateFallbackMs; menu_gate=0 disables it, menu_gate=1 (default) keeps it as
+    // the never-locked-out guarantee.
+    constexpr ULONGLONG kGateFallbackMs = 60000;
+
     int lastUiLevel = -1;
     bool lastSignedIn = false;
-    __int64 lastDwLobby = -1;
+    ULONGLONG uiLevelOnset = 0;
+
+    // [LOCAL] NOTE: do NOT call Live_SystemInfo() with arbitrary infoTypes to
+    // probe the connection state.  Tried on 2026-09-14 and it hard-crashes the
+    // game at the front-end transition: the function walks a table of info
+    // entries and dereferences a NULL string for the infoTypes it does not
+    // implement (AV at blackops3.exe+0x227CAC4, i.e. the I_stricmp area,
+    // Rcx=0, reached from the Live code).  Probing game internals with values
+    // the game itself never passes is not worth the risk.
 
     for (;;)
     {
@@ -984,8 +1055,10 @@ DWORD WINAPI MainThread(LPVOID lpParam)
             if (uiLevel != lastUiLevel)
             {
                 lastUiLevel = uiLevel;
+                if (uiLevel != 0 && uiLevelOnset == 0)
+                    uiLevelOnset = GetTickCount64();
                 char msg[64]{};
-                snprintf(msg, sizeof(msg), "probe: s_runningUILevel = %d", uiLevel);
+                snprintf(msg, sizeof(msg), "gate: front-end UI level = %d", uiLevel);
                 overlay::DebugLog(msg);
             }
 
@@ -997,32 +1070,39 @@ DWORD WINAPI MainThread(LPVOID lpParam)
                 {
                     lastSignedIn = signedIn;
                     char msg[64]{};
-                    snprintf(msg, sizeof(msg), "probe: demonware signed in = %d",
+                    snprintf(msg, sizeof(msg), "gate: demonware signed in = %d",
                         signedIn ? 1 : 0);
                     overlay::DebugLog(msg);
-
-                    // Provisional gate until the DW_LOBBY probe below has been
-                    // measured: sign-in alone arms a bit early (it completes on
-                    // the "press ENTER" screen), but it is still far better
-                    // than no gate at all.
-                    if (signedIn)
-                        overlay::NotifyMainMenuReached();
                 }
 
-                // [LOCAL] Candidate gate #2: the Demonware LOBBY object only
-                // exists once the game has actually set up the online session
-                // (i.e. the real main menu).  Sign-in alone happens in the
-                // background during the "press ENTER" screen, so it proved to
-                // be too early - watch this value instead.
-                const __int64 dwLobby = *(volatile __int64*)DW_LOBBY;
-                if (dwLobby != lastDwLobby)
-                {
-                    lastDwLobby = dwLobby;
-                    char msg[96]{};
-                    snprintf(msg, sizeof(msg), "probe: DW_LOBBY = 0x%llX",
-                        (unsigned long long)dwLobby);
-                    overlay::DebugLog(msg);
-                }
+                // [LOCAL] THE gate: real screen detection.  The game resolves the
+                // main menu's own labels (the Campaign / Multiplayer / Zombies
+                // buttons and the quick-join bar) at render time - measured
+                // 2026-09-14 23:16:04, while the title screen only ever resolves
+                // "按ENTER开始" and the connecting screen "正在连接到在线服务器".
+                // Works online and offline (pure UI text).
+                // The title-screen dismissal stays a precondition, so a label the
+                // game happens to pre-resolve earlier cannot arm the hotkey.
+                // The front-end-uptime fallback remains the last-resort net so
+                // the overlay can never end up permanently locked (menu_gate=0
+                // turns it off).  NotifyMainMenuReached() is idempotent.
+                const unsigned long long dismissed = overlay::TitleScreenDismissedMs();
+                // [LOCAL] The verbose UI diagnostics (every distinct UI-model path
+                // and UI string) were what found this signal and are off by
+                // default: hooks::EnableUiModelPathLog(true) would turn them on
+                // again for debugging, and the screen detection itself does not
+                // depend on it.
+                const bool mainMenuUp = dismissed != 0 && hooks::UiMainMenuSeen();
+                const bool fallbackPassed = uiLevelOnset != 0
+                    && (GetTickCount64() - uiLevelOnset) >= kGateFallbackMs;
+                if (mainMenuUp || (t7patch_menu_gate() != 0 && fallbackPassed))
+                    overlay::NotifyMainMenuReached();
+
+                // [LOCAL] The DW_LOBBY / PTR_LobbyVM / s_playerData_ptr value
+                // probes and the 24-byte uistate neighbourhood dump that lived
+                // here have been removed: they answered their question (none of
+                // them separates the "press ENTER" screen from the main menu -
+                // see the note before the loop) and only added log noise.
             }
         }
 

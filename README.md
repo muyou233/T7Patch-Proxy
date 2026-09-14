@@ -22,7 +22,7 @@ drop a single `d3d11.dll` into the game folder and you are done.
 - **Injector-free install via d3d11.dll proxy**
   - `BlackOps3.exe` statically imports `d3d11.dll` (only `D3D11CreateDevice`); this fork turns that into a DLL-hijack proxy
 - **Centralized data folder**: config and logs live in a `T7Patch\` subfolder of the game directory
-  (`t7patch.conf`, `t7patch_proxy.log`, `t7patch_block.log`, `crashes.log`)
+  (`t7patch.conf`, `t7patch.log`, `crashes.log`)
 - **Thread-safety fixes**
   - `friends_set` and the `dlcContent` cache were unsynchronized shared state; concurrent access could
     misjudge friends or crash. Both are now mutex-guarded, with Steam calls kept outside the lock
@@ -44,10 +44,12 @@ drop a single `d3d11.dll` into the game folder and you are done.
 
 Press `Insert` (changeable in the menu) once you are on the main menu:
 
+![In-game menu](docs/menu_overlay.png)
+
 - **Settings**: player name (prefilled with the game's current name) and room password -
   each row commits with its own `Save` button
-- **Toggles**: block the legacy shader compiler (hot plug/unplug, no restart) and
-  friends-only (applies on click)
+- **Toggles**: friends-only (applies on click), block the legacy shader compiler
+  (hot plug/unplug, no restart), auto-open the menu on the main menu
 - **Config**: English/Chinese switch and a custom hotkey (click the button, then press the
   new key; `ESC` cancels)
 - Game input is ignored while the menu is open, zero interference when it is closed

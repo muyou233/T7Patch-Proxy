@@ -182,6 +182,7 @@
     <ClInclude Include="overlay.h" />
     <ClInclude Include="Protection.h" />
     <ClInclude Include="structs.h" />
+    <ClInclude Include="t7patch_log.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
@@ -199,6 +200,7 @@
     <ClCompile Include="overlay.cpp" />
     <ClCompile Include="Protection.cpp" />
     <ClCompile Include="proxy\Proxy.cpp" />
+    <ClCompile Include="t7patch_log.cpp" />
     <ClCompile Include="imgui\imgui.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

@@ -370,8 +370,12 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
                     {
                         do
                         {
+                            // [LOCAL] modBaseSize, not dwSize: dwSize is the
+                            // sizeof(MODULEENTRY32W) the caller passed in, which
+                            // is why every line used to read "size=0x00000438".
                             fprintf(f, "%-40ws base=0x%p size=0x%08X\n",
-                                me.szModule, (void*)me.modBaseAddr, (unsigned)me.dwSize);
+                                me.szModule, (void*)me.modBaseAddr,
+                                (unsigned)me.modBaseSize);
                         } while (Module32NextW(snap, &me));
                     }
                     CloseHandle(snap);

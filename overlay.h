@@ -17,14 +17,20 @@ namespace overlay
     // D3D11CreateDeviceAndSwapChain.
     void OnSwapChainCreated(void* swapChain, void* device, void* immediateContext);
 
-    // [LOCAL] Called by Protection.cpp on the first DLC ownership query - the
-    // main menu builds its mode buttons by asking exactly this, so reaching
-    // here means the main menu is up.  If menu_auto_open is set, the overlay
-    // opens now (instead of at device-creation time, which is still on the
-    // startup screen).
+    // [LOCAL] Called by Protection.cpp once the overlay gate opens (online
+    // Demonware sign-in, or the front-end-uptime fallback when the game is
+    // offline - see MainThread).  Arms the hotkey, and opens the menu right
+    // away when menu_auto_open is set.
     void NotifyMainMenuReached();
 
-    // [LOCAL] Write a line to t7patch_overlay.log from other translation units
-    // (used by the UI-level probe in Protection.cpp MainThread).
+    // [LOCAL] Write a line to the patch's log (T7Patch\t7patch.log, tagged
+    // "overlay") from other translation units - Protection.cpp's gate, Hooks.cpp's
+    // UI-model observer.
     void DebugLog(const char* msg);
+
+    // [LOCAL] GetTickCount64() stamp of the moment the user dismissed the
+    // front-end's "press ENTER" title screen (0 = not dismissed yet).  This is
+    // the gate signal: it is the only measured event that actually separates
+    // that screen from the main menu (see OverlayWndProc).
+    unsigned long long TitleScreenDismissedMs();
 }

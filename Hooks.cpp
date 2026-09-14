@@ -1,11 +1,185 @@
 #include "Hooks.h"
+#include "overlay.h"     // [LOCAL] overlay::DebugLog for the UI-model path observer below
+#include "t7patch_log.h" // [LOCAL] the patch's single runtime log
 #include <cstdarg>
+#include <atomic>
 
 const char zbr_window_text[] = ZBR_WINDOW_TEXT;
 void* pOriginalGSFailure = nullptr;
 const char* bad_str = "bad";
 
 namespace hooks {
+
+	// [LOCAL] UI-model path observer (diagnostic, added 2026-09-14).
+	//
+	// BO3's front-end menus are LUI, and the game resolves them through the UI
+	// model tree - these three hooks are the only places the engine tells us
+	// which paths it is touching.  Logging each DISTINCT path once turns the
+	// overlay log into a record of which screens were built, which is how we
+	// hope to find a path that only appears once the real main menu is up (the
+	// "press ENTER" screen and the main menu are otherwise indistinguishable
+	// from the outside - see the six measured failures in Protection.cpp
+	// MainThread).
+	//
+	// This only WATCHES: nothing here calls game code with arguments of our own
+	// invention, and the existing early-outs stay exactly as they were.  Capped
+	// and deduplicated, so the log cost is bounded (128 lines per window, once
+	// each).  Deliberately lock-free: the hooks can run on different game
+	// threads, and the worst case is a duplicated or missing diagnostic line.
+	//
+	// The budget is per "window": logging only starts once the front-end UI is
+	// up (Protection.cpp calls EnableUiModelPathLog(true) on the UI-level edge),
+	// because the first launch otherwise spent all 128 entries on the boot-time
+	// model construction and recorded nothing about the "press ENTER" -> main
+	// menu transition we actually care about.
+	constexpr int kUiPathLogMax = 128;
+	std::atomic<bool> g_uiModelPathLog{ false };
+	int g_uiPathSeenCount = 0;
+	const char* g_uiPathSeen[kUiPathLogMax]{};
+	char g_uiPathStorage[kUiPathLogMax][64]{};
+
+	// UI text budget (see LogUiString further down).
+	constexpr int kUiStringLogMax = 100;
+	int g_uiStringSeenCount = 0;
+	const char* g_uiStringSeen[kUiStringLogMax]{};
+	char g_uiStringStorage[kUiStringLogMax][96]{};
+
+	// Fast path for the LUI menu-name observer: the resolved names are static
+	// strings in the game's cache, so an unchanged pointer means nothing new.
+	const char* g_lastLuiMenuName = nullptr;
+
+	void EnableUiModelPathLog(bool enable)
+	{
+		if (!enable)
+		{
+			g_uiModelPathLog = false;
+			return;
+		}
+		if (!g_uiModelPathLog.exchange(true))
+		{
+			g_uiPathSeenCount = 0; // fresh budget: boot paths are already logged
+			g_uiStringSeenCount = 0;
+			g_lastLuiMenuName = nullptr;
+		}
+	}
+
+	void LogUiModelPath(const char* kind, const char* path)
+	{
+		if (!g_uiModelPathLog.load() || !path || !path[0])
+			return;
+		for (int i = 0; i < g_uiPathSeenCount; ++i)
+		{
+			if (g_uiPathSeen[i] && strcmp(g_uiPathSeen[i], path) == 0)
+				return;
+		}
+		if (g_uiPathSeenCount >= kUiPathLogMax)
+			return;
+
+		strncpy_s(g_uiPathStorage[g_uiPathSeenCount],
+			sizeof(g_uiPathStorage[0]), path, _TRUNCATE);
+		g_uiPathSeen[g_uiPathSeenCount] = g_uiPathStorage[g_uiPathSeenCount];
+		++g_uiPathSeenCount;
+
+		char msg[192]{};
+		snprintf(msg, sizeof(msg), "uimodel[%s] %s", kind,
+			g_uiPathStorage[g_uiPathSeenCount - 1]);
+		overlay::DebugLog(msg);
+	}
+
+	// [LOCAL] THE screen-detection signal, measured 2026-09-14 23:16: the game
+	// resolves these labels exactly when the MAIN MENU renders - the three mode
+	// buttons (Campaign / Multiplayer / Zombies) and the quick-join bar.  The
+	// title screen only resolves "按ENTER开始" and the connecting screen only
+	// "正在连接到在线服务器" / "返回" / "ESC", so seeing one of these means the
+	// main menu is on screen (works online and offline - it is pure UI text).
+	// The labels are localised, so the Chinese and English wordings are both
+	// accepted; the game resolves them at render time, which is what makes this
+	// a real screen signal instead of a guess.
+	std::atomic<bool> g_mainMenuLabelSeen{ false };
+
+	bool IsMainMenuLabel(const char* text)
+	{
+		static const char* const kMarkers[] = {
+			"多人游戏", "Multiplayer", "MULTIPLAYER",   // mode button
+			"僵尸",     "Zombies",     "ZOMBIES",       // mode button
+			"战役",     "Campaign",    "CAMPAIGN",      // mode button
+			"QUICK JOIN",                               // quick-join bar (untranslated)
+			"服务器浏览器", "Server Browser",
+		};
+		for (const char* marker : kMarkers)
+		{
+			if (strstr(text, marker))
+				return true;
+		}
+		return false;
+	}
+
+	bool UiMainMenuSeen()
+	{
+		return g_mainMenuLabelSeen.load();
+	}
+
+	// [LOCAL] Second diagnostic: the UI text the game is building right now.
+	// The front-end renders different strings on the title screen and in the
+	// main menu, so a distinctive label appearing here would be a genuine
+	// "which screen is showing" signal (unlike the UI-model tree, which the
+	// front-end builds on a timer while the title screen is still up).
+	// (State declared next to the path-log budget above.)
+	void LogUiString(const char* kind, const char* text)
+	{
+		if (!text || !text[0])
+			return;
+
+		// [LOCAL] Screen detection first - it must work whether or not the
+		// verbose UI diagnostics are switched on.
+		if (!g_mainMenuLabelSeen.load() && IsMainMenuLabel(text))
+		{
+			g_mainMenuLabelSeen = true;
+			char msg[160]{};
+			snprintf(msg, sizeof(msg), "gate: main-menu label rendered (%s)", text);
+			overlay::DebugLog(msg);
+		}
+
+		if (!g_uiModelPathLog.load())
+			return;
+		for (int i = 0; i < g_uiStringSeenCount; ++i)
+		{
+			if (g_uiStringSeen[i] && strcmp(g_uiStringSeen[i], text) == 0)
+				return;
+		}
+		if (g_uiStringSeenCount >= kUiStringLogMax)
+			return;
+
+		strncpy_s(g_uiStringStorage[g_uiStringSeenCount],
+			sizeof(g_uiStringStorage[0]), text, _TRUNCATE);
+		g_uiStringSeen[g_uiStringSeenCount] = g_uiStringStorage[g_uiStringSeenCount];
+		++g_uiStringSeenCount;
+
+		char msg[160]{};
+		snprintf(msg, sizeof(msg), "uistring[%s] %s", kind,
+			g_uiStringStorage[g_uiStringSeenCount - 1]);
+		overlay::DebugLog(msg);
+	}
+
+	// [LOCAL] Second observer: the LUI menu-name lookup.  Whatever maps a menu
+	// index to a name sees every LUI menu the front-end opens, so the sequence
+	// of names is the closest thing to "which screen is showing" we can get
+	// without reverse-engineering the LUI state global.  Log-only: the value is
+	// always whatever the game's own function returned (the bounds guard the
+	// original (disabled) hook had is deliberately not applied here, matching
+	// today's behaviour where this hook is not installed at all).
+	void LogLuiMenuName(unsigned int index, const char* name)
+	{
+		if (!g_uiModelPathLog.load() || !name || !name[0])
+			return;
+		if (name == g_lastLuiMenuName)
+			return;
+		g_lastLuiMenuName = name;
+
+		char msg[160]{};
+		snprintf(msg, sizeof(msg), "luimenu[index=%u] %s", index, name);
+		overlay::DebugLog(msg);
+	}
 
 	namespace functions
 	{
@@ -111,10 +285,16 @@ namespace hooks {
 
 		const char* hkBG_Cache_GetLUIMenuForIndex(unsigned int inst, unsigned int index)
 		{
-			if (index >= 64u)
-				return bad_str;
-
-			return BG_Cache_GetLUIMenuForIndex(inst, index);
+			// [LOCAL] Log-only observer - see LogLuiMenuName.  The game's own
+			// result is always returned unchanged, so installing this hook cannot
+			// alter menu behaviour.  The out-of-bounds guard the old body had
+			// (index >= 64 -> "bad") is deliberately NOT applied: this hook was
+			// not installed before, so the guard was inactive as well, and
+			// restoring it here could break any caller that legitimately passes a
+			// larger index (that decision belongs to upstream).
+			const char* name = BG_Cache_GetLUIMenuForIndex(inst, index);
+			LogLuiMenuName(index, name);
+			return name;
 		}
 
 		const char* __fastcall hkBG_Cache_GetLUIMenuDataForIndex(unsigned int inst, unsigned int index)
@@ -279,6 +459,7 @@ namespace hooks {
 
 			strcpy_s(input, translatedString);
 			input[4095] = 0;
+			LogUiString("seh", translatedString); // [LOCAL] screen-content probe
 			int max = (int)strlen(input);
 
 			for (int i = 0; i < max; i++)
@@ -349,6 +530,7 @@ namespace hooks {
 			char input[4096]{};
 			strcpy_s(input, source);
 			input[4095] = 0;
+			LogUiString("model", source); // [LOCAL] screen-content probe
 			int max = (int)strlen(input);
 
 			bool b_replace = false;
@@ -809,6 +991,7 @@ namespace hooks {
 			{
 				return 0;
 			}
+			LogUiModelPath("get0", path);
 			return UI_Model_GetModelFromPath_0(parentNodeIndex, path);
 		}
 
@@ -839,6 +1022,7 @@ namespace hooks {
 			{
 				return 0;
 			}
+			LogUiModelPath("get", path);
 			return UI_Model_GetModelFromPath(parentNodeIndex, path);
 		}
 
@@ -869,6 +1053,7 @@ namespace hooks {
 			{
 				return 0;
 			}
+			LogUiModelPath("create", path);
 			return UI_Model_CreateModelFromPath(parentNodeIndex, path);
 		}
 
@@ -886,6 +1071,7 @@ namespace hooks {
 			{
 				return 0;
 			}
+			LogUiModelPath("alloc", path);
 			return UI_Model_AllocateNode(ancestorIndex, path, persistent);
 		}
 
@@ -994,8 +1180,13 @@ namespace hooks {
 		/*MH_CreateHook((LPVOID)REBASE(0xA7DE0), functions::hkBG_Cache_GetScriptMenuNameForIndex, (LPVOID*)&BG_Cache_GetScriptMenuNameForIndex);
 		MH_CreateHook((LPVOID)REBASE(0xA78A0), functions::hkBG_Cache_GetEventStringNameForIndex, (LPVOID*)&BG_Cache_GetEventStringNameForIndex);
 		MH_CreateHook((LPVOID)REBASE(0xA7AB0), functions::hkBG_Cache_GetLocStringNameForIndex, (LPVOID*)&BG_Cache_GetLocStringNameForIndex);
-		MH_CreateHook((LPVOID)REBASE(0xA7A00), functions::hkBG_Cache_GetLUIMenuForIndex, (LPVOID*)&BG_Cache_GetLUIMenuForIndex);
 		MH_CreateHook((LPVOID)REBASE(0xA7990), functions::hkBG_Cache_GetLUIMenuDataForIndex, (LPVOID*)&BG_Cache_GetLUIMenuDataForIndex);*/
+		// [LOCAL] BG_Cache_GetLUIMenuForIndex was hooked here (log-only observer,
+		// see LogLuiMenuName) to find out which LUI menu the front-end opens.  It
+		// never fired: measured on 2026-09-14 the whole front-end navigation runs
+		// without it, so it belongs to the in-game script menu system instead.
+		// Left unhooked (matches upstream) - the log-only implementation is kept
+		// for whoever needs it for that other system.
 		MH_CreateHook((LPVOID)REBASE(0x1EAAD60), functions::hkUserHasLicenseForApp, (LPVOID*)&UserHasLicenseForApp);
 		MH_CreateHook((LPVOID)REBASE(0x1DFCC60), functions::hkLiveInventory_GetItemQuantity, (LPVOID*)&LiveInventory_GetItemQuantity);
 		MH_CreateHook((LPVOID)REBASE(0x1E06110), functions::hkLiveEntitlements_IsEntitlementActiveForController, (LPVOID*)&LiveEntitlements_IsEntitlementActiveForController);
@@ -1024,61 +1215,18 @@ namespace hooks {
 	static HMODULE(WINAPI* fpLoadLibraryExW)(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) = nullptr;
 	static volatile LONG d3dc_block_count = 0;
 
-	// [LOCAL] Append one line to <game folder>\T7Patch\t7patch_block.log.  Used
-	// both for install diagnostics and for every intercepted load, so the user
-	// can verify the feature without any external tooling.
-	//
-	// The path is resolved from the main module location instead of the current
-	// working directory: T7PATCH_DATA_DIR is relative by design, but an
-	// intercepted LoadLibrary call can happen on a thread whose working
-	// directory is not the game folder, which would silently lose the log.
+	// [LOCAL] One line into the patch's single log (t7patch_log.h), tagged
+	// "block".  Used both for install diagnostics and for every intercepted
+	// load, so the user can verify the feature without any external tooling.
 	static void d3dc_block_write_log(const char* fmt, ...)
 	{
-		char exe_path[MAX_PATH] = {};
-		GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
-		char* slash = strrchr(exe_path, '\\');
-		if (slash)
-			*slash = '\0';
-
-		char log_path[MAX_PATH * 2];
-		snprintf(log_path, sizeof(log_path), "%s\\T7Patch\\t7patch_block.log", exe_path);
-
-		// Cap the log size: once it grows past 24 KB, rotate it to
-		// t7patch_block.log.old (replacing any previous .old) so the file can
-		// never grow without bound while keeping one generation of history.
-		WIN32_FILE_ATTRIBUTE_DATA logAttr = {};
-		if (GetFileAttributesExA(log_path, GetFileExInfoStandard, &logAttr))
-		{
-			const long long logSize =
-				((long long)logAttr.nFileSizeHigh << 32) | logAttr.nFileSizeLow;
-			if (logSize > 24 * 1024)
-			{
-				char old_path[MAX_PATH * 2];
-				snprintf(old_path, sizeof(old_path), "%s.old", log_path);
-				MoveFileExA(log_path, old_path, MOVEFILE_REPLACE_EXISTING);
-			}
-		}
-
-		FILE* f = fopen(log_path, "a+");
-		if (!f)
-			return;
-
-		// Timestamp format intentionally matches t7patch_proxy.log
-		// ([HH:MM:SS.mmm]) so the two logs can be merged and sorted into a
-		// single timeline:  Get-Content proxy.log, block.log | Sort-Object
-		SYSTEMTIME st = {};
-		GetLocalTime(&st);
-		fprintf(f, "[%02u:%02u:%02u.%03u] ",
-			st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
-
+		char text[512] = {};
 		va_list ap;
 		va_start(ap, fmt);
-		vfprintf(f, fmt, ap);
+		_vsnprintf_s(text, sizeof(text), _TRUNCATE, fmt, ap);
 		va_end(ap);
 
-		fprintf(f, "\n");
-		std::fflush(f);
-		std::fclose(f);
+		t7log::Append("block", text);
 	}
 
 	static bool contains_legacy_d3dcompiler(const wchar_t* s)
