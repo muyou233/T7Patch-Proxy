@@ -158,6 +158,14 @@ inline void t7patch_ensure_data_dir()
     (void)created;
 }
 
+// [LOCAL] Config helpers (implemented in Protection.cpp).
+// t7patch_load_config_early() reads t7patch.conf without touching the engine,
+// so it is safe from the DllMain-era thread that arms the 46 block; the getter
+// exposes the block_d3dcompiler46 switch (default: enabled).  Both are used
+// because the block is installed long before the normal settings path runs.
+void t7patch_load_config_early();
+bool t7patch_block_d3dcompiler46_enabled();
+
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")
 #define ZBR_VERSION_FULL "Patch 3.06"

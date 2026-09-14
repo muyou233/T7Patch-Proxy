@@ -1043,7 +1043,7 @@ namespace hooks {
 		char log_path[MAX_PATH * 2];
 		snprintf(log_path, sizeof(log_path), "%s\\T7Patch\\t7patch_block.log", exe_path);
 
-		// Cap the log size: once it grows past 64 KB, rotate it to
+		// Cap the log size: once it grows past 24 KB, rotate it to
 		// t7patch_block.log.old (replacing any previous .old) so the file can
 		// never grow without bound while keeping one generation of history.
 		WIN32_FILE_ATTRIBUTE_DATA logAttr = {};
@@ -1051,7 +1051,7 @@ namespace hooks {
 		{
 			const long long logSize =
 				((long long)logAttr.nFileSizeHigh << 32) | logAttr.nFileSizeLow;
-			if (logSize > 64 * 1024)
+			if (logSize > 24 * 1024)
 			{
 				char old_path[MAX_PATH * 2];
 				snprintf(old_path, sizeof(old_path), "%s.old", log_path);
@@ -1136,6 +1136,15 @@ namespace hooks {
 		if (InterlockedCompareExchange(&already_installed, 1, 0) != 0)
 		{
 			OutputDebugStringA("[T7Patch] d3dcompiler_46 block already armed\n");
+			return;
+		}
+
+		// [LOCAL] Config switch (t7patch.conf -> block_d3dcompiler46, default 1).
+		// Evaluated at arm time; changing it needs a game restart.
+		if (!t7patch_block_d3dcompiler46_enabled())
+		{
+			OutputDebugStringA("[T7Patch] d3dcompiler_46 block disabled by config\n");
+			d3dc_block_write_log("block disabled by config (block_d3dcompiler46=0)");
 			return;
 		}
 

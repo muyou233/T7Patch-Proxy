@@ -230,7 +230,7 @@ namespace
             return;
         }
 
-        // [LOCAL] Cap the log size: once t7patch_proxy.log grows past 64 KB,
+        // [LOCAL] Cap the log size: once t7patch_proxy.log grows past 24 KB,
         // rotate it to t7patch_proxy.log.old (replacing any previous .old) so
         // the file can never grow without bound while keeping one generation
         // of history for debugging.
@@ -239,7 +239,7 @@ namespace
         {
             const long long logSize =
                 ((long long)logAttr.nFileSizeHigh << 32) | logAttr.nFileSizeLow;
-            if (logSize > 64 * 1024)
+            if (logSize > 24 * 1024)
                 MoveFileExA(PROXY_LOG_FILE, PROXY_LOG_FILE ".old",
                             MOVEFILE_REPLACE_EXISTING);
         }

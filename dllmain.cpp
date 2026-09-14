@@ -613,6 +613,11 @@ EXPORT void Unload()
 // at ~+14.4 s - so 500 ms costs nothing.
 static DWORD WINAPI D3DCBlockEarlyThread(LPVOID)
 {
+    // [LOCAL] Read t7patch.conf first so the block_d3dcompiler46 switch is
+    // honoured on the very first launch.  This only parses the file - the
+    // engine-dependent apply_settings() path still runs much later.
+    t7patch_load_config_early();
+
     Sleep(500);
     hooks::InstallD3DCompilerBlock();
     return 0;

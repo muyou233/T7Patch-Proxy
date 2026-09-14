@@ -324,7 +324,6 @@ bool Protection::IsFriendByXUIDUncached(__int64 xuid) // ok I say its "uncached"
     return result;
 }
 
-unsigned __int64 check_dlc_next = 0;
 // [LOCAL] Steam answers two DIFFERENT questions on adjacent vtable slots:
 //   slot 0x30 (index 6) = BIsSubscribedApp  -> "do you OWN it?"
 //   slot 0x38 (index 7) = BIsDlcInstalled   -> "is it INSTALLED?"
@@ -337,6 +336,34 @@ unsigned __int64 check_dlc_next = 0;
 // Give each question its own cache.
 std::unordered_map<INT32, bool> dlcContent;   // slot 0x30 - BIsSubscribedApp (owns)
 std::unordered_map<INT32, bool> dlcInstalled; // slot 0x38 - BIsDlcInstalled  (installed?)
+
+// [LOCAL] Steam's "installed?" answer is not trustworthy on its own: after a
+// DLC is unchecked in Steam the licence state can still report installed
+// while the mode's payload files are already gone - which is what kept the
+// campaign button enabled.  Cross-check the real files in <game>\zone\.
+// (Same approach as upstream Scroptss/T7Patch-src commit a0b1164.)
+static bool IsModeContentFilePresent(INT32 appId)
+{
+    const wchar_t* contentFile = nullptr;
+    switch (appId)
+    {
+    case 366840: contentFile = L"cp_common.xpak"; break; // campaign
+    case 366841: contentFile = L"mp_common.xpak"; break; // multiplayer
+    case 366842: contentFile = L"zm_common.xpak"; break; // zombies
+    default: return true; // unknown id: no local payload to check
+    }
+
+    wchar_t executablePath[MAX_PATH]{};
+    const auto pathLength = GetModuleFileNameW(nullptr, executablePath, MAX_PATH);
+    if (pathLength == 0 || pathLength >= MAX_PATH)
+    {
+        return false;
+    }
+
+    std::error_code error;
+    const auto path = std::filesystem::path(executablePath).parent_path() / L"zone" / contentFile;
+    return std::filesystem::is_regular_file(path, error);
+}
 // [LOCAL] dlcContent is shared by GetOwnsContent/GetOwnsContent2, which can be
 // called from different threads. operator[] inserts (and can rehash) on miss,
 // so an unlocked find() racing it is undefined behaviour. The Steam round-trip
@@ -350,7 +377,7 @@ std::mutex dlc_content_mutex;
 bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
 {
     #if SPOOF_UNLOCK_ALL
-        return true;
+        return IsModeContentFilePresent(itemid); // [LOCAL] spoof stays plausible too
     #endif
 
     // [LOCAL] previously: unlocked find() + operator[] write, racing other threads
@@ -364,11 +391,14 @@ bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
             return it->second;
     }
 
-    bool result = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT))(_interface, itemid);
+    const bool steamReportsInstalled = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT))(_interface, itemid);
+    // [LOCAL] Steam state alone is not enough: the mode's .xpak files must
+    // really exist, otherwise a DLC unchecked in Steam still shows its button
+    // as available.  Requires both answers to say "yes".
+    const bool result = steamReportsInstalled && IsModeContentFilePresent(itemid);
 
     {
         std::lock_guard<std::mutex> lock(dlc_content_mutex);
-        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
         dlcInstalled[itemid] = result;
     }
     return result;
@@ -377,10 +407,11 @@ bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
 bool Protection::GetOwnsContent2(INT64 _interface, INT32 itemid)
 {
     #if SPOOF_UNLOCK_ALL
-        return true;
+        return IsModeContentFilePresent(itemid); // [LOCAL] spoof stays plausible too
     #endif
 
     // [LOCAL] previously: unlocked find() + operator[] write, racing other threads
+    // This slot (0x30) is BIsSubscribedApp - the "do you OWN it?" question.
     {
         std::lock_guard<std::mutex> lock(dlc_content_mutex);
         auto it = dlcContent.find(itemid);
@@ -388,11 +419,10 @@ bool Protection::GetOwnsContent2(INT64 _interface, INT32 itemid)
             return it->second;
     }
 
-    bool result = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT2))(_interface, itemid);
+    const bool result = ((bool(__fastcall*)(INT64, INT64))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_CHECK_OWNS_CONTENT2))(_interface, itemid);
 
     {
         std::lock_guard<std::mutex> lock(dlc_content_mutex);
-        check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
         dlcContent[itemid] = result;
     }
     return result;
@@ -603,6 +633,10 @@ struct patch_config
     char playername[16];
     int isfriendsonly;
     char* networkpassword;
+    // [LOCAL] 1 = intercept in-process loads of the legacy d3dcompiler_46.dll
+    // (see hooks::InstallD3DCompilerBlock).  Default ON; write
+    // block_d3dcompiler46=0 into t7patch.conf and restart the game to disable.
+    int block_d3dcompiler46;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -611,6 +645,7 @@ struct patch_config
         networkpassword = (char*)malloc(4);
         memset(networkpassword, 0, 4);
         isfriendsonly = true;
+        block_d3dcompiler46 = true;
         exists = false;
         modified = std::filesystem::file_time_type();
         __playername();
@@ -654,9 +689,27 @@ struct patch_config
             return;
         }
 
+        // [LOCAL] Per-setting notes, each on the line(s) directly above its
+        // setting.  Lines without '=' are skipped by loadfrom(), so comments
+        // and blank lines are safe; keep '=' out of the prose itself.  The
+        // project builds with /utf-8, so these literals are written as UTF-8.
+        outfile << "# T7Patch 设置 - 保存后约 1 秒内生效，无需重启游戏" << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 留空则使用游戏自带的名称" << std::endl;
         outfile << "playername=" << playername << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 仅好友可以邀请/加入你（默认开）1/0开启关闭" << std::endl;
         outfile << "isfriendsonly=" << isfriendsonly << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 私人房间密码；留空则不设置" << std::endl;
         outfile << "networkpassword=" << networkpassword << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
+        outfile << "block_d3dcompiler46=" << block_d3dcompiler46 << std::endl;
 
         outfile.close();
         update_watcher_time(path);
@@ -723,6 +776,16 @@ struct patch_config
                 strcpy_s(networkpassword, bufsize, val.data());
             }
             break;
+            case FNV32("block_d3dcompiler46"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> block_d3dcompiler46;
+                if (ivalread.fail())
+                {
+                    block_d3dcompiler46 = true; // default: enabled
+                }
+            }
+            break;
             }
         }
 
@@ -732,6 +795,22 @@ struct patch_config
 };
 
 patch_config user_config;
+
+// [LOCAL] Config helpers exposed to dllmain.cpp / Hooks.cpp.  The 46 block is
+// installed long before apply_settings() runs, so it needs its own read-only
+// config load (no engine calls - safe this early) plus a simple getter.
+void t7patch_load_config_early()
+{
+    if (fs_exists(PATCH_CONFIG_LOCATION))
+    {
+        user_config.loadfrom(PATCH_CONFIG_LOCATION);
+    }
+}
+
+bool t7patch_block_d3dcompiler46_enabled()
+{
+    return user_config.block_d3dcompiler46 != 0;
+}
 
 void apply_settings()
 {
