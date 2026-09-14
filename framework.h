@@ -168,7 +168,7 @@ bool t7patch_block_d3dcompiler46_enabled();
 
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")
-#define ZBR_VERSION_FULL "Patch 3.06"
+#define ZBR_VERSION_FULL "Patch 3.07"
 #define SPOOF_UNLOCK_ALL false
 #define SPOOF_SKIP_CWL false
 #define SPOOF_GUM_COUNT 255
