@@ -325,7 +325,18 @@ bool Protection::IsFriendByXUIDUncached(__int64 xuid) // ok I say its "uncached"
 }
 
 unsigned __int64 check_dlc_next = 0;
-std::unordered_map<INT32, bool> dlcContent;
+// [LOCAL] Steam answers two DIFFERENT questions on adjacent vtable slots:
+//   slot 0x30 (index 6) = BIsSubscribedApp  -> "do you OWN it?"
+//   slot 0x38 (index 7) = BIsDlcInstalled   -> "is it INSTALLED?"
+// (Cross-check: the original author's note below says slot 0x18 = IsVACBanned,
+//  and 0x18/8 = index 3 is exactly BIsVACBanned in ISteamApps - so the slot
+//  mapping above is confirmed.)
+// Both questions used to share ONE cache keyed only by itemid, so an
+// "owns = true" answer poisoned the later "installed?" query: with the
+// campaign DLC unchecked the campaign button still showed as enabled.
+// Give each question its own cache.
+std::unordered_map<INT32, bool> dlcContent;   // slot 0x30 - BIsSubscribedApp (owns)
+std::unordered_map<INT32, bool> dlcInstalled; // slot 0x38 - BIsDlcInstalled  (installed?)
 // [LOCAL] dlcContent is shared by GetOwnsContent/GetOwnsContent2, which can be
 // called from different threads. operator[] inserts (and can rehash) on miss,
 // so an unlocked find() racing it is undefined behaviour. The Steam round-trip
@@ -343,10 +354,13 @@ bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
     #endif
 
     // [LOCAL] previously: unlocked find() + operator[] write, racing other threads
+    // [LOCAL] uses dlcInstalled: this slot (0x38) is BIsDlcInstalled, i.e. the
+    // "is it installed?" question - sharing the "owns" cache here made the
+    // campaign button appear enabled with the campaign DLC unchecked.
     {
         std::lock_guard<std::mutex> lock(dlc_content_mutex);
-        auto it = dlcContent.find(itemid);
-        if (it != dlcContent.end())
+        auto it = dlcInstalled.find(itemid);
+        if (it != dlcInstalled.end())
             return it->second;
     }
 
@@ -355,7 +369,7 @@ bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
     {
         std::lock_guard<std::mutex> lock(dlc_content_mutex);
         check_dlc_next = GetTickCount64() + (60 * 10 * 1000);
-        dlcContent[itemid] = result;
+        dlcInstalled[itemid] = result;
     }
     return result;
 }
