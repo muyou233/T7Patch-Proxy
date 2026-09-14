@@ -23,4 +23,8 @@ namespace overlay
     // opens now (instead of at device-creation time, which is still on the
     // startup screen).
     void NotifyMainMenuReached();
+
+    // [LOCAL] Write a line to t7patch_overlay.log from other translation units
+    // (used by the UI-level probe in Protection.cpp MainThread).
+    void DebugLog(const char* msg);
 }

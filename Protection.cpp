@@ -377,11 +377,10 @@ std::mutex dlc_content_mutex;
 
 bool Protection::GetOwnsContent(INT64 _interface, INT32 itemid)
 {
-    // [LOCAL] First ownership query = the main menu is building its mode
-    // buttons.  Signal the overlay so menu_auto_open fires here instead of
-    // on the startup screen.
-    overlay::NotifyMainMenuReached();
-
+    // [LOCAL] Note: this used to arm the overlay ("the main menu must be
+    // building its buttons").  Measured live, this query also runs on the
+    // "press ENTER" screen, so the gate moved to MainThread and waits for the
+    // Demonware sign-in instead.
     #if SPOOF_UNLOCK_ALL
         return IsModeContentFilePresent(itemid); // [LOCAL] spoof stays plausible too
     #endif
@@ -647,6 +646,8 @@ struct patch_config
     // and whether the menu opens automatically at game start (default off).
     int menu_key;
     int menu_auto_open;
+    // [LOCAL] Overlay menu language: 1 = Chinese (default), 0 = English.
+    int menu_lang;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -658,6 +659,7 @@ struct patch_config
         block_d3dcompiler46 = true;
         menu_key = 45;      // VK_INSERT
         menu_auto_open = 0; // start closed; Insert opens the menu
+        menu_lang = 1;      // Chinese by default
         exists = false;
         modified = std::filesystem::file_time_type();
         __playername();
@@ -725,6 +727,7 @@ struct patch_config
         outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）；1：进入主菜单后自动打开菜单" << std::endl;
         outfile << "menu_key=" << menu_key << std::endl;
         outfile << "menu_auto_open=" << menu_auto_open << std::endl;
+        outfile << "menu_lang=" << menu_lang << std::endl;
 
         outfile.close();
         update_watcher_time(path);
@@ -821,6 +824,16 @@ struct patch_config
                 }
             }
             break;
+            case FNV32("menu_lang"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> menu_lang;
+                if (ivalread.fail())
+                {
+                    menu_lang = 1; // default: Chinese
+                }
+            }
+            break;
             }
         }
 
@@ -854,6 +867,24 @@ int t7patch_menu_key()
     return user_config.menu_key;
 }
 
+// [LOCAL] Overlay menu language (1 = Chinese, 0 = English).
+int t7patch_cfg_menu_lang()
+{
+    return user_config.menu_lang;
+}
+
+void t7patch_cfg_set_menu_lang(int value)
+{
+    user_config.menu_lang = value ? 1 : 0;
+}
+
+// [LOCAL] Change the overlay hotkey (virtual-key code) from the menu.
+void t7patch_cfg_set_menu_key(int vk)
+{
+    if (vk > 0 && vk < 256)
+        user_config.menu_key = vk;
+}
+
 bool t7patch_menu_auto_open()
 {
     return user_config.menu_auto_open != 0;
@@ -869,14 +900,35 @@ void t7patch_config_set_block46(bool enable)
 // menu edits (playername, friends-only, ...) take effect immediately.
 void t7patch_config_save()
 {
+    // [LOCAL] Persist only - deliberately NO apply_settings() here.  This is
+    // called from the overlay menu, i.e. from the render thread, and
+    // apply_settings touches engine state (window text, Steam, dvars) that is
+    // only safe from the update thread.  The config watcher notices the file
+    // change within ~1 s and applies it there, which is also exactly what the
+    // config template promises ("edits apply within ~1 second").
     user_config.saveto(PATCH_CONFIG_LOCATION);
-    apply_settings();
 }
 
 // [LOCAL] Field-level accessors for the overlay menu (patch_config lives in
 // this file, so the menu talks to it through these narrow helpers).
 const char* t7patch_cfg_playername() { return user_config.playername; }
-void t7patch_cfg_set_playername(const char* v)
+
+// [LOCAL] The game's own current player name.  While no custom name is set the
+// engine keeps it in pNameBuffer (SetPlayerName only overwrites that buffer
+// for a real custom name), so reading it shows the user what the game is
+// actually using.  Copied into a static because the caller only keeps the
+// pointer for the duration of the menu refresh.
+const char* t7patch_game_playername()
+{
+    static char nameBuf[24] = {};
+    const char* src = (const char*)pNameBuffer;
+    if (src && *src)
+    {
+        strncpy_s(nameBuf, sizeof(nameBuf), src, _TRUNCATE);
+        return nameBuf;
+    }
+    return "";
+}void t7patch_cfg_set_playername(const char* v)
 {
     strncpy_s(user_config.playername, sizeof(user_config.playername), v, _TRUNCATE);
 }
@@ -909,6 +961,15 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     std::srand((unsigned int)time(NULL)); // [LOCAL] C4244: explicit time_t truncation
     *(__int32*)OFFSET(0x11250898) = rand();
 
+    // [LOCAL] Overlay gate probes.  Two candidates were tested live and both
+    // fire too early: s_runningUILevel already reads 1 on the "press ENTER"
+    // screen, and the DLC ownership query happens before connecting too.  The
+    // reliable signal is the Live/Demonware sign-in: it only completes when
+    // the game really reaches the online main menu.
+    int lastUiLevel = -1;
+    bool lastSignedIn = false;
+    __int64 lastDwLobby = -1;
+
     for (;;)
     {
         arxan_bypass::maintain();
@@ -917,6 +978,54 @@ DWORD WINAPI MainThread(LPVOID lpParam)
             user_config.loadfrom(PATCH_CONFIG_LOCATION);
             apply_settings();
         }
+
+        {
+            const int uiLevel = (int)*(volatile char*)OFF_s_runningUILevel;
+            if (uiLevel != lastUiLevel)
+            {
+                lastUiLevel = uiLevel;
+                char msg[64]{};
+                snprintf(msg, sizeof(msg), "probe: s_runningUILevel = %d", uiLevel);
+                overlay::DebugLog(msg);
+            }
+
+            // Only safe to call game functions once the game UI is running.
+            if (lastUiLevel != 0)
+            {
+                const bool signedIn = Live_IsUserSignedInToDemonware(CONTROLLER_INDEX_0);
+                if (signedIn != lastSignedIn)
+                {
+                    lastSignedIn = signedIn;
+                    char msg[64]{};
+                    snprintf(msg, sizeof(msg), "probe: demonware signed in = %d",
+                        signedIn ? 1 : 0);
+                    overlay::DebugLog(msg);
+
+                    // Provisional gate until the DW_LOBBY probe below has been
+                    // measured: sign-in alone arms a bit early (it completes on
+                    // the "press ENTER" screen), but it is still far better
+                    // than no gate at all.
+                    if (signedIn)
+                        overlay::NotifyMainMenuReached();
+                }
+
+                // [LOCAL] Candidate gate #2: the Demonware LOBBY object only
+                // exists once the game has actually set up the online session
+                // (i.e. the real main menu).  Sign-in alone happens in the
+                // background during the "press ENTER" screen, so it proved to
+                // be too early - watch this value instead.
+                const __int64 dwLobby = *(volatile __int64*)DW_LOBBY;
+                if (dwLobby != lastDwLobby)
+                {
+                    lastDwLobby = dwLobby;
+                    char msg[96]{};
+                    snprintf(msg, sizeof(msg), "probe: DW_LOBBY = 0x%llX",
+                        (unsigned long long)dwLobby);
+                    overlay::DebugLog(msg);
+                }
+            }
+        }
+
         Sleep(1000);
     }
 
