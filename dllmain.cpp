@@ -1,4 +1,5 @@
 #include "framework.h"
+#include <tlhelp32.h> // [LOCAL] module enumeration for the crash dump
 
 // Implemented in proxy/Proxy.cpp.  Loads the genuine System32\d3d11.dll and
 // fills in the export forwarder table, so this DLL can also be installed as a
@@ -350,6 +351,35 @@ void ExceptHook(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT ContextRecord)
                     fprintf(f, "[%p] %p %p\n\n\n", (void*)(kvp.second.Rsp + i), (void*)*(int64_t*)(kvp.second.Rsp + i), (void*)*(int64_t*)(kvp.second.Rsp + i + 8));
                 }
                 SavedExceptions.erase(kvp.first);
+            }
+
+            // [LOCAL] Dump every loaded module with its base and size.  ASLR
+            // reshuffles addresses on every launch, so without this list the
+            // "Exception at" address cannot be matched to its owning module
+            // after the fact (it printed "<Unknown Module>" the first time we
+            // hit exactly that problem).  CreateToolhelp32Snapshot is
+            // kernel32-only and safe enough for this context.
+            fprintf(f, "\n[modules]\n");
+            {
+                HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+                if (snap != INVALID_HANDLE_VALUE)
+                {
+                    MODULEENTRY32W me{};
+                    me.dwSize = sizeof(me);
+                    if (Module32FirstW(snap, &me))
+                    {
+                        do
+                        {
+                            fprintf(f, "%-40ws base=0x%p size=0x%08X\n",
+                                me.szModule, (void*)me.modBaseAddr, (unsigned)me.dwSize);
+                        } while (Module32NextW(snap, &me));
+                    }
+                    CloseHandle(snap);
+                }
+                else
+                {
+                    fprintf(f, "(module snapshot failed, err=%lu)\n", GetLastError());
+                }
             }
 
             // dump script context
