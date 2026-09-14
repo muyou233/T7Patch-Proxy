@@ -165,6 +165,8 @@ inline void t7patch_ensure_data_dir()
 // because the block is installed long before the normal settings path runs.
 void t7patch_load_config_early();
 bool t7patch_block_d3dcompiler46_enabled();
+int t7patch_menu_key();          // virtual-key code that toggles the overlay (default VK_INSERT)
+bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
 
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")

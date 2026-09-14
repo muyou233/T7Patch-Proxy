@@ -637,6 +637,10 @@ struct patch_config
     // (see hooks::InstallD3DCompilerBlock).  Default ON; write
     // block_d3dcompiler46=0 into t7patch.conf and restart the game to disable.
     int block_d3dcompiler46;
+    // [LOCAL] ImGui menu: hotkey virtual-key code (default VK_INSERT = 45)
+    // and whether the menu opens automatically at game start (default off).
+    int menu_key;
+    int menu_auto_open;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -646,6 +650,8 @@ struct patch_config
         memset(networkpassword, 0, 4);
         isfriendsonly = true;
         block_d3dcompiler46 = true;
+        menu_key = 45;      // VK_INSERT
+        menu_auto_open = 0; // start closed; Insert opens the menu
         exists = false;
         modified = std::filesystem::file_time_type();
         __playername();
@@ -710,6 +716,9 @@ struct patch_config
 
         outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
         outfile << "block_d3dcompiler46=" << block_d3dcompiler46 << std::endl;
+        outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）；1/0：启动时自动打开菜单" << std::endl;
+        outfile << "menu_key=" << menu_key << std::endl;
+        outfile << "menu_auto_open=" << menu_auto_open << std::endl;
 
         outfile.close();
         update_watcher_time(path);
@@ -786,6 +795,26 @@ struct patch_config
                 }
             }
             break;
+            case FNV32("menu_key"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> menu_key;
+                if (ivalread.fail())
+                {
+                    menu_key = 45; // VK_INSERT
+                }
+            }
+            break;
+            case FNV32("menu_auto_open"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> menu_auto_open;
+                if (ivalread.fail())
+                {
+                    menu_auto_open = 0; // default: closed at start
+                }
+            }
+            break;
             }
         }
 
@@ -810,6 +839,16 @@ void t7patch_load_config_early()
 bool t7patch_block_d3dcompiler46_enabled()
 {
     return user_config.block_d3dcompiler46 != 0;
+}
+
+int t7patch_menu_key()
+{
+    return user_config.menu_key;
+}
+
+bool t7patch_menu_auto_open()
+{
+    return user_config.menu_auto_open != 0;
 }
 
 void apply_settings()

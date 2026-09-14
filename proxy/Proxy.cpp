@@ -37,6 +37,7 @@
 // =====================================================================
 
 #include "framework.h"
+#include "overlay.h" // [LOCAL] in-game ImGui overlay
 
 #include <atomic>
 #include <cstdio>
@@ -412,7 +413,11 @@ extern "C" HRESULT WINAPI D3D11CreateDevice(
     // and the dvar / Steam / lobby gates in PatchWorker are what actually keep
     // it safe.  This also matches what the T7Patch.exe injector does.
     if (CallerIsMainExecutable(caller))
+    {
         StartPatchOnce();
+        overlay::OnDeviceCreated(ppDevice ? *ppDevice : nullptr,
+            ppImmediateContext ? *ppImmediateContext : nullptr);
+    }
 
     return hr;
 }
@@ -444,7 +449,13 @@ extern "C" HRESULT WINAPI D3D11CreateDeviceAndSwapChain(
     // See the note in D3D11CreateDevice: a failed creation must not stop
     // T7Patch from loading.
     if (CallerIsMainExecutable(caller))
+    {
         StartPatchOnce();
+        overlay::OnSwapChainCreated(
+            ppSwapChain ? *ppSwapChain : nullptr,
+            ppDevice ? *ppDevice : nullptr,
+            ppImmediateContext ? *ppImmediateContext : nullptr);
+    }
 
     return hr;
 }
