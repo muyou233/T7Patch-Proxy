@@ -1,0 +1,23 @@
+// [LOCAL] Ships the dictionary inside the dll as the factory default.
+//
+// Why both a built-in copy AND the external file:
+//   - The external file (<game>\T7Patch\translate_zh.txt) still WINS whenever it
+//     exists.  That is what keeps "edit the text file, see it in game two
+//     seconds later, no rebuild" working - the whole point of keeping it out of
+//     the dll in the first place.
+//   - The built-in copy is what makes the install self-contained (nothing to
+//     copy next to d3d11.dll) and what keeps translation alive when the external
+//     file is missing, corrupt or empty - before this, losing that one file
+//     silently disabled the whole feature.
+//
+// Consequence: this resource only has to be recompiled when the BUILT-IN copy
+// should move forward - i.e. on a release.  Editing translate_zh.txt for the
+// running game does NOT need a rebuild.
+//
+// The path is relative to this .rc file (rc.exe resolves relative paths against
+// the directory of the resource script), i.e. <repo>\translate\translate_zh.txt.
+
+#include <windows.h>
+#include "translate_res.h"
+
+IDR_TRANSLATE_DICT RCDATA "..\\translate\\translate_zh.txt"

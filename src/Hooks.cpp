@@ -1,6 +1,7 @@
 #include "Hooks.h"
 #include "overlay.h"     // [LOCAL] overlay::DebugLog for the UI-model path observer below
 #include "t7patch_log.h" // [LOCAL] the patch's single runtime log
+#include "translate.h"   // [LOCAL] UI string translation layer
 #include <cstdarg>
 #include <atomic>
 
@@ -460,6 +461,19 @@ namespace hooks {
 			strcpy_s(input, translatedString);
 			input[4095] = 0;
 			LogUiString("seh", translatedString); // [LOCAL] screen-content probe
+
+			// [LOCAL] UI translation layer.  Whole-string exact match only: a
+			// miss leaves the original text untouched, so a partial match can
+			// never corrupt unrelated UI text.  Collect() runs first and stores
+			// the ENGLISH source (it skips strings that already carry non-ASCII
+			// bytes), then the dictionary replaces it for display.
+			translate::Collect(input);
+			if (translate::Enabled())
+			{
+				char translated[4096] = {};
+				if (translate::Lookup(input, translated, sizeof(translated)))
+					strcpy_s(input, translated);
+			}
 			int max = (int)strlen(input);
 
 			for (int i = 0; i < max; i++)
@@ -550,6 +564,17 @@ namespace hooks {
 			strcpy_s(input, source);
 			input[4095] = 0;
 			LogUiString("model", source); // [LOCAL] screen-content probe
+
+			// [LOCAL] Same translation layer as the SEH hook above - see the
+			// comment there; the two functions are the whole front-end string
+			// pipeline, which is why the dictionary covers mods as well.
+			translate::Collect(input);
+			if (translate::Enabled())
+			{
+				char translated[4096] = {};
+				if (translate::Lookup(input, translated, sizeof(translated)))
+					strcpy_s(input, translated);
+			}
 			int max = (int)strlen(input);
 
 			bool b_replace = false;

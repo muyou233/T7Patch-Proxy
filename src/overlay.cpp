@@ -23,6 +23,7 @@
 #include "Hooks.h"       // [LOCAL] 46-block runtime toggle + interception counter
 #include "t7patch_log.h" // [LOCAL] the patch's single runtime log
 #include "GithubMark.h"  // [LOCAL] embedded alpha mask for the bottom-right link
+#include "dict_update.h" // [LOCAL] on-demand dictionary update (button-triggered)
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 #include "imgui/backends/imgui_impl_win32.h"
@@ -233,6 +234,18 @@ namespace
         ImGui::Spacing();
     }
 
+    // Same card with an EXPLICIT height (no auto-resize): page 2 uses it so its
+    // single card fills the page instead of floating in an otherwise empty
+    // panel.  Content shorter than the height just leaves breathing room.
+    void BeginCardSized(const char* title, float height)
+    {
+        ImGui::BeginChild(title, ImVec2(0.0f, height), ImGuiChildFlags_Borders);
+        ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
+        ImGui::TextUnformatted(title);
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+    }
+
     // -----------------------------------------------------------------
     //  Localisation: one string table per language.  menu_lang picks the
     //  table; switching is live (no restart, no rebuild).
@@ -268,6 +281,22 @@ namespace
         const char* friendsOnlyTip;
         const char* autoOpen;
         const char* autoOpenTip;
+        // [LOCAL] On-demand dictionary update - a button in the toggles card.
+        // The patch never downloads by itself: this is the overlay's only
+        // network entry point and it takes a deliberate click.
+        const char* dictUpdate;
+        const char* dictUpdateTip;
+        const char* dictUpdating;
+        const char* dictUpdatedFmt;
+        const char* dictFailedFmt;
+        // [LOCAL] Page tabs + the page-2 card title.  The panel is a fixed
+        // 395x440 with no scrollbar and the first page was full, so new
+        // functionality goes onto a second page instead of squeezing this one.
+        const char* pageGeneral;
+        const char* pageMore;
+        const char* moreCard;
+        const char* modTranslate;
+        const char* modTranslateTip;
         const char* about;
     };
 
@@ -278,13 +307,23 @@ namespace
         "运行时长：%02u:%02u:%02u",
         "旧着色器编译器状态：%s",
         "语言", "呼出按键", "请按下新按键…（ESC 取消）",
-        "按 %s 呼出/隐藏本窗口",
+        "按 %s 呼出/隐藏",
         "重启游戏后生效。",
         "仅好友可以邀请/加入你。\n"
         "立即生效，重启后保持。",
         "自动打开窗口",
         "进入主菜单后自动打开本窗口。\n"
         "下次启动生效。",
+        "更新词库",
+        "从网络下载最新的汉化词库，替换本机的词库文件。\n"
+        "下载后约 2 秒内生效，无需重启游戏。",
+        "下载中…",
+        "已更新 %u 条",
+        "更新失败：%s",
+        "常规", "更多", "工具",
+        "mod 汉化",
+        "开启后，本体与模组界面里的英文文本会被替换成中文。\n"
+        "改动立即生效，重启后保持。",
         "关于"
     };
     constexpr MenuText kTextEn = {
@@ -294,13 +333,23 @@ namespace
         "Session uptime: %02u:%02u:%02u",
         "Legacy shader compiler status: %s",
         "Language", "Hotkey", "Press any key... (ESC cancels)",
-        "Press %s to toggle this window",
+        "Press %s to toggle",
         "Takes effect after a restart.",
         "Only friends can invite/join you.\n"
         "Applies instantly and is kept across restarts.",
         "Auto-open in main menu",
         "Opens this window automatically once the main menu is up.\n"
         "Takes effect on the next launch.",
+        "Update dictionary",
+        "Downloads the latest translation dictionary and replaces the local\n"
+        "file.  Active within about two seconds - no restart needed.",
+        "Downloading...",
+        "Updated %u entries",
+        "Update failed: %s",
+        "General", "More", "Tools",
+        "Mod translations",
+        "Replaces English text in the base game and mods with Chinese.\n"
+        "Applies immediately and is kept across restarts.",
         "About"
     };
 
@@ -347,14 +396,26 @@ namespace
         return buf;
     }
 
-    // Small language selector button: the active language is drawn in accent.
+    // Small selector button (language, page tabs): the ACTIVE one is drawn in
+    // accent and STAYS that way.  All three button colours get pinned, because
+    // ImGui switches to ButtonHovered/ButtonActive while the cursor is over the
+    // button - an accent button that greys out on hover reads as "no longer
+    // selected", which is exactly the flicker the user asked to remove.
+    //
+    // Inactive buttons keep the theme's hover feedback on purpose: that is the
+    // "this one is clickable" cue.  The Save button is a plain ImGui::Button
+    // elsewhere and is deliberately not affected by any of this.
     bool LangButton(const char* label, bool active)
     {
         if (active)
+        {
             ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, kAccent);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, kAccent);
+        }
         const bool clicked = ImGui::Button(label, ImVec2(56.0f, 0.0f));
         if (active)
-            ImGui::PopStyleColor();
+            ImGui::PopStyleColor(3);
         return clicked;
     }
 
@@ -463,6 +524,11 @@ namespace
             }
         }
 
+        // Which page is showing.  Function-level static on purpose: only the UI
+        // thread ever touches it (it does not even cross threads, unlike
+        // g_capturingHotkey which the message hook also sees).
+        static int g_activePage = 0;
+
         // [LOCAL] Fixed layout: the panel is laid out for exactly this size.
         // ImGuiCond_Always pins it every frame (imgui.ini cannot override),
         // the constraints lock out edges-dragging, and the NoScrollbar flags
@@ -483,6 +549,87 @@ namespace
             return;
         }
 
+        // [LOCAL] Page tabs.  The panel was full, so functionality beyond the
+        // basics lives on a second page.  LangButton doubles as the tab control:
+        // small, and the active one draws in accent - exactly what a tab needs.
+        {
+            const bool onGeneral = g_activePage == 0;
+            if (LangButton(L()->pageGeneral, onGeneral))
+                g_activePage = 0;
+            ImGui::SameLine();
+            if (LangButton(L()->pageMore, !onGeneral))
+                g_activePage = 1;
+        }
+
+        if (g_activePage != 0)
+        {
+            // ---- page 2: things that do not need a slot on the main page ----
+            // [LOCAL] The card FILLS the page: a lone auto-sized card floating in
+            // an otherwise empty panel reads as broken.  Height = everything
+            // above the mark's band: that band is exactly one icon tall plus one
+            // spacing, and the mark itself is pinned to the BOTTOM of the content
+            // area below - so the card can grow right up against it and any
+            // leftover from layout rounding lands INSIDE the card, not between
+            // the card and the mark.
+            const float toolsFill = ImGui::GetContentRegionAvail().y
+                - (ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemSpacing.y);
+            BeginCardSized(L()->moreCard, toolsFill);
+            {
+                // [LOCAL] The mod-translation switch sits beside the update
+                // button on purpose: both are "Chinese text" features, so the
+                // row reads as one grouped action instead of two stray ones.
+                // The switch only writes the config; it taking effect is the
+                // config-apply path re-running translate::Init().
+                bool modTrans = t7patch_cfg_translate_enabled();
+                if (SolidCheckbox(L()->modTranslate, &modTrans))
+                {
+                    t7patch_cfg_set_translate(modTrans ? 1 : 0);
+                    t7patch_config_save();
+                }
+                ImGui::SetItemTooltip("%s", L()->modTranslateTip);
+
+                // [LOCAL] The update button lives here now: it is a low-frequency
+                // action, and it had already cost the main page its bottom line
+                // once (see the layout note in MEMORY.md - the panel is a fixed
+                // 395x440).  Auto width - the fixed 140px read like a progress
+                // bar around a four-character label.  The result text sits right
+                // beside the button and is kept SHORT: a glanceable status, the
+                // details live in the log.
+                const dict_update::Status du = dict_update::Get();
+                const bool downloading = du.state == dict_update::State::Running;
+
+                // Same row as the switch above - that grouping is the whole point
+                // of this row.  (This SameLine got lost in a later edit once and
+                // the button dropped to its own row; the fixcheck anchor below
+                // exists so it stays found.)
+                ImGui::SameLine();
+                char dictBtn[96]{};
+                snprintf(dictBtn, sizeof(dictBtn), "%s##dictupdate", L()->dictUpdate);
+                if (ImGui::Button(dictBtn, ImVec2(0.0f, 0.0f)) && !downloading)
+                    dict_update::Start();
+                ImGui::SetItemTooltip("%s", L()->dictUpdateTip);
+
+                if (downloading)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dictUpdating);
+                }
+                else if (du.state == dict_update::State::Ok)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text(L()->dictUpdatedFmt, du.entries);
+                }
+                else if (du.state == dict_update::State::Failed)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text(L()->dictFailedFmt, du.message);
+                }
+            }
+            EndCard();
+        }
+        else
+        {
+        // ---- page 1: everything that was here before ----
         BeginCard(L()->settings);
         {
             // [LOCAL] Table layout: fixed label column, stretched field column,
@@ -605,46 +752,51 @@ namespace
                 capturingKey ? "..." : VkName(t7patch_menu_key()));
             if (ImGui::Button(hotkeyBtn, ImVec2(90.0f, 0.0f)) && !capturingKey)
                 g_capturingHotkey = true;
-            // [LOCAL] Same delayed tooltip as the rest of the panel.  It is
-            // only a reminder anyway - the bottom hint already shows the
-            // "press a key" prompt the moment capture starts.
             if (capturingKey)
+            {
+                // [LOCAL] Same delayed tooltip as the rest of the panel.  It is
+                // the only place the "press a key" prompt is spelled out now that
+                // the reminder sits inline - the full prompt would not fit this
+                // column (it is wider than the whole row in English).
                 ImGui::SetItemTooltip("%s", L()->pressAnyKey);
+            }
+            else
+            {
+                // [LOCAL] "Press <key> to toggle" moved here from the bottom of
+                // the panel.  Two reasons: it belongs next to the key it
+                // describes, and its old line is what now pays for the update
+                // button's row (the panel is a fixed 395x440 with no scrollbar,
+                // so every line is spoken for).  Shortened to fit this column -
+                // the English wording had to lose "this window".
+                char hint[160]{};
+                snprintf(hint, sizeof(hint), L()->hint, VkName(t7patch_menu_key()));
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", hint);
+            }
         }
         EndCard();
+        } // end of page 1 (the if above was page 2's branch)
 
+        // [LOCAL] GitHub mark: PAGE 2 ONLY.  Page 1's cards auto-size and flow
+        // edge-to-edge with no band reserved at the bottom, so pinning the mark
+        // to the panel bottom drew it on top of the config card there (2026-09-16,
+        // user screenshot).  Page 2 is the one whose full-height card leaves an
+        // exact band for it - and the user explicitly preferred it that way.
+        if (g_activePage != 0)
         {
-            // Bottom hint: while capturing the key it becomes the "press a key"
-            // prompt (this line sits outside the cards, so changing its text
-            // cannot resize anything).
-            char hint[160]{};
-            if (g_capturingHotkey.load())
-                snprintf(hint, sizeof(hint), "%s", L()->pressAnyKey);
-            else
-                snprintf(hint, sizeof(hint), L()->hint, VkName(t7patch_menu_key()));
-            ImGui::TextDisabled("%s", hint);
+            const float iconSize = ImGui::GetTextLineHeight();
+            constexpr float kIconPad = 4.0f;
+            const float iconItemWidth = iconSize + kIconPad * 2.0f;
+            ImGui::SetCursorPosY(ImGui::GetWindowSize().y
+                - ImGui::GetStyle().WindowPadding.y - iconSize);
+            ImGui::SetCursorPosX(ImGui::GetWindowSize().x
+                - ImGui::GetStyle().WindowPadding.x - iconItemWidth);
 
-            // [LOCAL] GitHub mark, pinned to the panel's bottom-right corner.
-            // It shares the hint's line so it costs NO extra panel height (the
-            // panel is a fixed 395x440 and the slack is spoken for), and it is
-            // anchored from the RIGHT - content right edge minus the item width
-            // - rather than appended after the hint: while capturing a hotkey
-            // the hint swaps to the "press a key" prompt, and a left-anchored
-            // item would be dragged around by the changing hint width.
-            // SameLine()'s offset is window-local from the window's left edge,
-            // so "Size - padding" is the content's right edge (the window is
-            // NoScrollbar, so there is no scrollbar width to subtract).
-            //
             // InvisibleButton + AddImage rather than ImageButton: ImageButton
             // always paints the regular button background behind the image,
             // which would drop a grey square onto the panel.  Same hand-drawn
             // pattern SolidCheckbox above uses.  The hit area is a few pixels
             // wider than the glyph so it is comfortable to click.
-            const float iconSize = ImGui::GetTextLineHeight();
-            constexpr float kIconPad = 4.0f;
-            const float iconItemWidth = iconSize + kIconPad * 2.0f;
-            ImGui::SameLine(ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x
-                - iconItemWidth);
             const bool linkPressed = ImGui::InvisibleButton("##githublink",
                 ImVec2(iconItemWidth, iconSize));
             const bool linkHovered = ImGui::IsItemHovered();

@@ -184,6 +184,7 @@
     <ClInclude Include="src\Protection.h" />
     <ClInclude Include="src\structs.h" />
     <ClInclude Include="src\t7patch_log.h" />
+    <ClInclude Include="src\translate.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
@@ -194,6 +195,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Arxan.cpp" />
+    <ClCompile Include="src\dict_update.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\gscu_hashing.cpp" />
     <ClCompile Include="src\Hooks.cpp" />
@@ -202,6 +204,8 @@
     <ClCompile Include="src\Protection.cpp" />
     <ClCompile Include="src\proxy\Proxy.cpp" />
     <ClCompile Include="src\t7patch_log.cpp" />
+    <ResourceCompile Include="src\translate_default.rc" />
+    <ClCompile Include="src\translate.cpp" />
     <ClCompile Include="imgui\imgui.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

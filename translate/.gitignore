@@ -1,0 +1,5 @@
+# 词库本体（translate_zh.txt）要进版本库；这些是同步工具留下的备份与临时文件，不要。
+# translate_sync.py 的 deploy 会留 .old、pull 会在源目录留 .old、下载中途用 .download。
+*.old
+*.new
+*.download

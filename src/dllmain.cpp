@@ -1,4 +1,5 @@
 #include "framework.h"
+#include "translate.h"  // [LOCAL] UI translation layer
 #include <tlhelp32.h> // [LOCAL] module enumeration for the crash dump
 
 // Implemented in proxy/Proxy.cpp.  Loads the genuine System32\d3d11.dll and
@@ -553,6 +554,11 @@ void RunPatching()
 
 	// Apply Memory patches
 	hooks::ApplyMemoryPatches();
+
+	// [LOCAL] Load the UI translation layer (dictionary + switches).  The
+	// string hooks are already installed above, so doing this last means the
+	// very first UI frame is translated as well.
+	translate::Init();
 
 	// Apply Exception Handler
     InstallHook(ExceptHook);

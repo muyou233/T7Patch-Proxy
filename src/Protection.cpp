@@ -2,6 +2,7 @@
 #include "Hooks.h"   // [LOCAL] EnableUiModelPathLog (UI-model path observer)
 #include "overlay.h" // [LOCAL] NotifyMainMenuReached (menu_auto_open timing)
 #include "t7patch_log.h" // [LOCAL] the 46-file renames go to the patch's single log
+#include "translate.h"   // [LOCAL] UI translation layer (dictionary reload hook)
 
 #include <mutex>  // [LOCAL] guards the config object, friends_set and dlcContent
 #include <atomic> // [LOCAL] the config apply hand-off flag (menu Save -> MainThread)
@@ -756,6 +757,12 @@ struct patch_config
     int menu_auto_open;
     // [LOCAL] Overlay menu language: 1 = Chinese (default), 0 = English.
     int menu_lang;
+    // [LOCAL] UI translation layer (src/translate.cpp): 1 = replace English UI
+    // text with the dictionary in T7Patch\translate_zh.txt, 0 = off (default).
+    // The second switch turns on collection mode, which records every distinct
+    // English UI string into T7Patch\ui_dump.txt for building that dictionary.
+    int translate;
+    int dump_ui_strings;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -771,6 +778,8 @@ struct patch_config
         int menu_key;
         int menu_auto_open;
         int menu_lang;
+        int translate;
+        int dump_ui_strings;
     };
 
     patch_config()
@@ -782,6 +791,8 @@ struct patch_config
         menu_key = 45;      // VK_INSERT
         menu_auto_open = 1; // auto-open on the main menu (user default)
         menu_lang = 1;      // Chinese by default
+        translate = 0;      // translation off unless asked for
+        dump_ui_strings = 0;
         exists = false;
         modified = std::filesystem::file_time_type();
         // [LOCAL] Was: strcat_s(playername, "Unknown Soldier");
@@ -802,6 +813,8 @@ struct patch_config
         v.menu_key = menu_key;
         v.menu_auto_open = menu_auto_open;
         v.menu_lang = menu_lang;
+        v.translate = translate;
+        v.dump_ui_strings = dump_ui_strings;
     }
 
     void publish_locked(const values& v)
@@ -813,6 +826,8 @@ struct patch_config
         menu_key = v.menu_key;
         menu_auto_open = v.menu_auto_open;
         menu_lang = v.menu_lang;
+        translate = v.translate;
+        dump_ui_strings = v.dump_ui_strings;
     }
 
     // [LOCAL] Assumes g_config_mutex is held: its two callers (saveto and
@@ -905,6 +920,14 @@ struct patch_config
 
         outfile << "# 菜单语言 1/0中文英文" << std::endl;
         outfile << "menu_lang=" << v.menu_lang << std::endl;
+        outfile << std::endl;
+
+        outfile << "# UI 翻译：1/0开启关闭（把英文界面文本替换为 T7Patch\\translate_zh.txt 里的中文）" << std::endl;
+        outfile << "translate=" << v.translate << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 采集界面英文文本到 T7Patch\\ui_dump.txt（做词库用）1/0开启关闭" << std::endl;
+        outfile << "dump_ui_strings=" << v.dump_ui_strings << std::endl;
         outfile << std::endl;
 
         outfile.close();
@@ -1050,6 +1073,26 @@ struct patch_config
                 }
             }
             break;
+            case FNV32("translate"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> v.translate;
+                if (ivalread.fail())
+                {
+                    v.translate = 0; // default: off
+                }
+            }
+            break;
+            case FNV32("dump_ui_strings"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> v.dump_ui_strings;
+                if (ivalread.fail())
+                {
+                    v.dump_ui_strings = 0; // default: off
+                }
+            }
+            break;
             }
         }
 
@@ -1125,6 +1168,28 @@ void t7patch_cfg_set_menu_lang(int value)
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.menu_lang = value ? 1 : 0;
+}
+
+// [LOCAL] UI translation layer switches (see src/translate.cpp).
+bool t7patch_cfg_translate_enabled()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.translate != 0;
+}
+
+bool t7patch_cfg_dump_ui_strings()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.dump_ui_strings != 0;
+}
+
+// [LOCAL] Toggle the translation layer from the menu (page 2, next to the
+// dictionary update button).  Writing the value is all the menu does; making it
+// take effect is the config-apply path, which re-runs translate::Init().
+void t7patch_cfg_set_translate(int enabled)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.translate = enabled ? 1 : 0;
 }
 
 // [LOCAL] Change the overlay hotkey (virtual-key code) from the menu.
@@ -1500,6 +1565,14 @@ void apply_settings()
     // be missing in the same way, and telling them apart is exactly what the
     // 2026-09-15 rename investigation needed.
     overlay::DebugLog("settings applied to the engine");
+
+    // [LOCAL] Give the translation layer a retry on every config (re-)apply:
+    // at start-up RunPatching may run before the config is readable, and a user
+    // who flips translate=1 by hand should not have to restart the game.
+    // Init, NOT EnsureLoaded: Init re-reads the config unconditionally, so
+    // turning the switch OFF from the menu takes effect too - EnsureLoaded
+    // returns early while the layer is still enabled and would leave it running.
+    translate::Init();
 }
 
 DWORD WINAPI MainThread(LPVOID lpParam)
