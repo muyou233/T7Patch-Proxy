@@ -108,7 +108,7 @@ namespace dict_update
                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
             if (!session)
             {
-                err = "WinHttpOpen failed";
+                err = "network error";
                 return false;
             }
             WinHttpSetTimeouts(session, 10000, 10000, 15000, 20000);
@@ -148,10 +148,15 @@ namespace dict_update
                         }
                         else if (status != 200)
                         {
-                            char buf[64] = {};
-                            snprintf(buf, sizeof(buf), "HTTP %lu",
+                            // [LOCAL] The message goes straight to the overlay
+                            // beside the button, so it stays plain text - no
+                            // status codes, no numbers (user's call).  The
+                            // technical detail lives in the log only.
+                            Logf("dictionary update: the server answered HTTP %lu",
                                 static_cast<unsigned long>(status));
-                            err = buf;
+                            err = (status == 404)
+                                ? "the dictionary is not on the update source yet"
+                                : "the update source is not responding correctly";
                         }
                         else
                         {
@@ -231,13 +236,16 @@ namespace dict_update
             const unsigned have = translate::EntryCount();
             if (got == 0)
             {
-                Fail("no usable entries (%u bytes)",
+                Logf("dictionary update failed: %u bytes with no usable entries",
                     static_cast<unsigned>(body.size()));
+                Fail("the downloaded file is not a dictionary");
                 return;
             }
             if (have > 0 && got < static_cast<unsigned>(have * kMinKeepRatio))
             {
-                Fail("refused: %u vs %u entries", got, have);
+                Logf("dictionary update failed: only %u entries (currently %u)",
+                    got, have);
+                Fail("the downloaded dictionary looks incomplete");
                 return;
             }
 
