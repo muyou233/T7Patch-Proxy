@@ -55,9 +55,30 @@ namespace
     constexpr ImVec4 kIconRest = ImVec4(0.720f, 0.720f, 0.720f, 1.00f);
     constexpr ImVec4 kIconHover = kAccent;
 
+    // [LOCAL] Tooltip timing, in seconds.  The panel is small and the pointer
+    // has to cross most of it to reach anything, so the ImGui default (fire the
+    // instant the pointer touches an item) meant a tooltip popped up on every
+    // fly-by.  A tooltip now needs BOTH: the pointer to stop moving for
+    // kTooltipStillSec, and then to rest on the item for kTooltipDelaySec.
+    // Tune these two numbers to taste - they are the only knobs.
+    constexpr float kTooltipStillSec = 0.20f;
+    constexpr float kTooltipDelaySec = 0.60f;
+
     void ApplyOverlayTheme()
     {
         ImGuiStyle& s = ImGui::GetStyle();
+
+        // [LOCAL] What ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) - used
+        // by every tooltip in DrawMenu, directly or via SetItemTooltip() -
+        // resolves to for the mouse.  Setting the style field (rather than the
+        // flags per call site) keeps one definition for the whole panel, and
+        // ImGui still picks the nav variant automatically for gamepads.
+        s.HoverStationaryDelay = kTooltipStillSec;
+        s.HoverDelayNormal = kTooltipDelaySec;
+        s.HoverFlagsForTooltipMouse = ImGuiHoveredFlags_Stationary
+            | ImGuiHoveredFlags_DelayNormal
+            | ImGuiHoveredFlags_AllowWhenDisabled;
+
         s.WindowRounding = 6.0f;
         s.ChildRounding = 5.0f;
         s.FrameRounding = 4.0f;
@@ -521,14 +542,17 @@ namespace
                 t7patch_cfg_set_friends_only(friendsOnly);
                 t7patch_config_save();
             }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", L()->friendsOnlyTip);
+            // [LOCAL] SetItemTooltip() is the "IsItemHovered(ForTooltip) then
+            // SetTooltip()" idiom, so it inherits the panel-wide hover delay
+            // from ApplyOverlayTheme: rest on the item, no fly-by popups.
+            // (There used to be an explicit IsItemHovered() here, with no flags
+            // - that is the instant version.)
+            ImGui::SetItemTooltip("%s", L()->friendsOnlyTip);
 
             bool block46 = hooks::IsD3DCompilerBlockEnabled();
             if (SolidCheckbox(L()->blockShader, &block46))
                 hooks::SetD3DCompilerBlock(block46);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", L()->blockShaderTip);
+            ImGui::SetItemTooltip("%s", L()->blockShaderTip);
 
             // [LOCAL] Auto-open: open the window by itself once the main menu
             // is reached (same signal as the hotkey gate).  Only takes effect
@@ -540,8 +564,7 @@ namespace
                 t7patch_cfg_set_menu_auto_open(autoOpen);
                 t7patch_config_save();
             }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", L()->autoOpenTip);
+            ImGui::SetItemTooltip("%s", L()->autoOpenTip);
         }
         EndCard();
 
@@ -576,8 +599,11 @@ namespace
                 capturingKey ? "..." : VkName(t7patch_menu_key()));
             if (ImGui::Button(hotkeyBtn, ImVec2(90.0f, 0.0f)) && !capturingKey)
                 g_capturingHotkey = true;
-            if (capturingKey && ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", L()->pressAnyKey);
+            // [LOCAL] Same delayed tooltip as the rest of the panel.  It is
+            // only a reminder anyway - the bottom hint already shows the
+            // "press a key" prompt the moment capture starts.
+            if (capturingKey)
+                ImGui::SetItemTooltip("%s", L()->pressAnyKey);
         }
         EndCard();
 
@@ -616,6 +642,12 @@ namespace
             const bool linkPressed = ImGui::InvisibleButton("##githublink",
                 ImVec2(iconItemWidth, iconSize));
             const bool linkHovered = ImGui::IsItemHovered();
+            // [LOCAL] Two different hover tests on purpose.  The tooltip is
+            // delayed like every other one (see ApplyOverlayTheme), but the
+            // cursor and the icon tint below stay INSTANT: those are the "this
+            // is clickable" feedback, and feedback that lags the pointer just
+            // feels broken.
+            const bool linkTipDue = ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip);
             const ImVec2 linkMin = ImGui::GetItemRectMin();
             const ImVec2 linkMax = ImGui::GetItemRectMax();
 
@@ -630,13 +662,13 @@ namespace
             }
 
             if (linkHovered)
-            {
                 ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-                // Label only.  The URL is deliberately NOT part of the tooltip -
-                // a raw "https://github.com/..." line reads like debug output
-                // next to the rest of the panel's copy.
+
+            // Label only.  The URL is deliberately NOT part of the tooltip -
+            // a raw "https://github.com/..." line reads like debug output
+            // next to the rest of the panel's copy.
+            if (linkTipDue)
                 ImGui::SetTooltip("%s", L()->about);
-            }
 
             if (linkPressed)
             {
