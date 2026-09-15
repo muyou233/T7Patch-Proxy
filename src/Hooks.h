@@ -8,18 +8,19 @@ namespace hooks {
 	extern void ApplyHooks();
 	extern void DestroyHooks();
 
-	// [LOCAL] Blocks in-process loading of the legacy d3dcompiler_46.dll so the
-	// engine falls back to the modern D3DCompiler_47 shader pipeline.
-	// Fixes the map-load / first-effect hitching caused by realtime HLSL
-	// compilation through the old runtime compiler.  (User-verified fix.)
+	// [LOCAL] Fallback layer of the legacy d3dcompiler_46 opt-out: refuses
+	// in-process loads of that module.  The primary mechanism is the FILE MOVE
+	// in Protection.cpp (t7patch_d3dcompiler46_*); this hook only covers what
+	// a move cannot - a read-only game folder, or the file being put back by
+	// hand while the game runs.  It never fired once across four measured
+	// sessions (2026-09-15); see the note in Hooks.cpp.
 	extern void InstallD3DCompilerBlock();
 
-	// [LOCAL] Runtime toggle for the overlay menu.  The hook is created once
-	// at startup; these flip whether calls land in it (MinHook enable/disable,
-	// no re-hooking).  SetD3DCompilerBlock also keeps t7patch.conf in sync.
+	// [LOCAL] Menu toggle: moves the file (primary) and enables/disables the
+	// hook (fallback), then keeps t7patch.conf in sync.
 	extern void SetD3DCompilerBlock(bool enable);
-	extern bool IsD3DCompilerBlockEnabled();
-	extern int  GetD3DCompilerBlockCount(); // interceptions this session
+	extern bool IsD3DCompilerBlockEnabled(); // the SETTING, not the hook state
+	extern int  GetD3DCompilerBlockCount();  // hook interceptions this session
 
 	// [LOCAL] Diagnostic switch, OFF by default: record every distinct UI-model
 	// path the game touches (and LUI menu names) into the patch's log.

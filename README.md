@@ -13,7 +13,10 @@ drop a single `d3d11.dll` into the game folder and you are done.
   non-friends cannot invite you, pull you into lobbies, or interact with you
 - **Crash protection**: guards against game crashes caused by malformed packets
 - **Reduced attack surface**: closes risky entry points (workshop subscription, in-game browser)
-- **Performance**: removes the stuttering caused by DLC scanning and the legacy shader compiler
+- **Performance**: removes the stuttering caused by DLC scanning
+- **Legacy shader compiler opt-out**: renames the engine's `d3dcompiler_46.dll` to
+  `d3dcompiler_46.dll.bak` at launch, so the engine cannot use it (renamed back when the
+  toggle is switched off)
 - **In-game control panel**: press `Insert` on the main menu for a visual menu - toggle every
   feature above, EN/中文 switch, no config editing needed
 
@@ -45,7 +48,9 @@ drop a single `d3d11.dll` into the game folder and you are done.
 1. Get `d3d11.dll` from the [Releases](../../releases) page (or build it yourself)
 2. Close the game, copy `d3d11.dll` next to `BlackOps3.exe`
 3. Launch the game — `Patch 3.08` in the top-right corner means success; a `T7Patch\` folder is created automatically
-4. **Uninstall**: delete that `d3d11.dll`; the game files are never modified
+4. **Uninstall**: delete that `d3d11.dll`. The patch touches exactly one game file besides: while the
+   legacy-compiler switch is on, `d3dcompiler_46.dll` is renamed to `d3dcompiler_46.dll.bak` — switch
+   that toggle off (or rename the file back, or run Steam's *Verify integrity*) to restore it
 
 ## In-game menu
 
@@ -55,8 +60,8 @@ Press `Insert` (changeable in the menu) once you are on the main menu:
 
 - **Settings**: player name (prefilled with the game's current name) and room password -
   each row commits with its own `Save` button
-- **Toggles**: friends-only (applies on click), block the legacy shader compiler
-  (hot plug/unplug, no restart), auto-open the menu on the main menu
+- **Toggles**: friends-only (applies on click), opt out of the legacy shader compiler (renames the
+  file; takes effect on the next launch), auto-open the menu on the main menu
 - **Config**: English/Chinese switch and a custom hotkey (click the button, then press the
   new key; `ESC` cancels)
 - Game input is ignored while the menu is open, zero interference when it is closed
@@ -72,7 +77,7 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `playername=` | empty = the game's current name; set = override in-game name |
 | `isfriendsonly=` | `1` = friends only (recommended) |
 | `networkpassword=` | room password, use together with friends-only |
-| `block_d3dcompiler46=` | `1` = block the legacy shader compiler (default on; also a menu toggle) |
+| `block_d3dcompiler46=` | `1` = rename `d3dcompiler_46.dll` to `.dll.bak` at launch (default on; also a menu toggle) |
 | `menu_key=` | virtual-key code that opens the menu (default `45` = Insert) |
 | `menu_auto_open=` | `1` = open the menu automatically once the main menu is up, ~1.5 s after it appears (default `0`) |
 | `menu_lang=` | `1` = Chinese (default), `0` = English |

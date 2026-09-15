@@ -249,7 +249,17 @@ namespace
         const char* friendsOnly;
         const char* blockShader;
         const char* uptimeFmt;
-        const char* interceptionsFmt;
+        // [LOCAL] Reserved status wording for the 46 file's DISK state (kept
+        // with the other reserved strings; nothing renders it yet).  If a
+        // caller ever appears, the argument is a word localized for the current
+        // UI language, and the value comes from
+        // t7patch_d3dcompiler46_file_state(): 0 = file in place, 1 = isolated
+        // as .bak, 2 = missing, 3 = both copies.  Pass the DISK state, never
+        // the switch value: the disk read exists precisely to expose a rename
+        // that failed.  Localized words to use -
+        //   zh: 未隔离（文件在原位）/ 已隔离（已改名 .bak）/ 文件不存在 / 两份并存（异常）
+        //   en: not isolated / isolated (renamed to .bak) / file not found / both copies present
+        const char* blockStateFmt;
         const char* language;
         const char* hotkey;
         const char* pressAnyKey;
@@ -266,12 +276,10 @@ namespace
         "玩家昵称", "房间密码", "保存",
         "仅好友可加入", "屏蔽旧着色器编译器",
         "运行时长：%02u:%02u:%02u",
-        "本次拦截旧着色器调用：%d 次",
+        "旧着色器编译器状态：%s",
         "语言", "呼出按键", "请按下新按键…（ESC 取消）",
         "按 %s 呼出/隐藏本窗口",
-        "在进程内拦截旧版 d3dcompiler_46.dll。\n"
-        "修复地图加载 / 首次特效时的卡顿。\n"
-        "重启后保持。",
+        "重启游戏后生效。",
         "仅好友可以邀请/加入你。\n"
         "立即生效，重启后保持。",
         "自动打开窗口",
@@ -284,12 +292,10 @@ namespace
         "Player name", "Room password", "Save",
         "Friends only", "Block legacy shader compiler",
         "Session uptime: %02u:%02u:%02u",
-        "d3dcompiler_46 interceptions this session: %d",
+        "Legacy shader compiler status: %s",
         "Language", "Hotkey", "Press any key... (ESC cancels)",
         "Press %s to toggle this window",
-        "Intercepts the legacy d3dcompiler_46.dll in-process.\n"
-        "Fixes the map-load / first-effect hitching.\n"
-        "Kept across restarts.",
+        "Takes effect after a restart.",
         "Only friends can invite/join you.\n"
         "Applies instantly and is kept across restarts.",
         "Auto-open in main menu",

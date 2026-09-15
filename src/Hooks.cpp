@@ -1250,14 +1250,25 @@ namespace hooks {
 	}
 
 	// [LOCAL] ============================================================
-	// Legacy shader-compiler blocker.
+	// Legacy shader-compiler blocker - FALLBACK LAYER.
 	//
-	// A d3dcompiler_46.dll found next to BlackOps3.exe makes the engine
-	// compile HLSL shaders through the old runtime compiler on the fly,
-	// which shows up as hitching whenever a map loads or an effect first
-	// appears.  Deleting the file fixes it (user-verified), so we emulate
-	// exactly that: LoadLibraryExW returns NULL for this module and the
-	// engine falls back to the modern D3DCompiler_47 pipeline.
+	// The mechanism that actually does the job now lives in Protection.cpp:
+	// the switch renames <game>\d3dcompiler_46.dll to
+	// <game>\d3dcompiler_46.dll.bak (and renames it back when the switch is
+	// off), so the engine cannot find the file at all.  This hook is kept as a
+	// second line of defence for what a rename cannot cover: a read-only game
+	// folder, or the file being put back by hand while the game is running.
+	//
+	// Corrected 2026-09-15: the comment that used to stand here claimed the
+	// engine "falls back to the modern D3DCompiler_47 pipeline" once the load
+	// is refused.  That was never measured and it is wrong.  The
+	// D3DCompiler_47 seen in the process comes from OUR OWN import table
+	// (imgui compiles its pipeline shaders with D3DCompile - see
+	// imgui/backends/imgui_impl_dx11.cpp), while the game itself neither
+	// imports nor requests any d3dcompiler.  Four measured sessions logged
+	// this hook as armed and never firing a single time, and the file was
+	// never opened or mapped by the game.  Only a "block #N" log line is
+	// proof that this hook ever did anything.
 	// ============================================================
 	static HMODULE(WINAPI* fpLoadLibraryExW)(LPCWSTR lpLibFileName, HANDLE hFile, DWORD dwFlags) = nullptr;
 	static volatile LONG d3dc_block_count = 0;
@@ -1316,7 +1327,7 @@ namespace hooks {
 				(int)d3dc_block_count, lpLibFileName, dwFlags);
 
 			SetLastError(ERROR_MOD_NOT_FOUND);
-			return NULL; // engine falls back to D3DCompiler_47
+			return NULL; // report "not found" (see the note above)
 		}
 		return fpLoadLibraryExW(lpLibFileName, hFile, dwFlags);
 	}
@@ -1382,30 +1393,43 @@ namespace hooks {
 		}
 	}
 
-	// [LOCAL] Menu-side runtime toggle.  MinHook keeps the hook registered;
-	// Enable/Disable only flip whether calls land in hkLoadLibraryExW.  The
-	// config file is updated too, so the choice survives a restart.
+	// [LOCAL] Menu-side toggle.  Two layers, and the order matters:
+	//   1. the file move (Protection.cpp) - this is what changes what the
+	//      engine can see, and it is the only reason the switch does anything;
+	//   2. the LoadLibraryExW hook above, kept as a fallback.
+	// The move runs even when the hook was never created (MinHook failure) or
+	// is already in the wanted state, and the config is written either way, so
+	// the next launch reconciles to the same state.
 	void SetD3DCompilerBlock(bool enable)
 	{
-		if (!g_block46Created || enable == (g_block46Enabled != 0))
-			return;
+		t7patch_config_set_block46(enable);
 
-		MH_STATUS rc = enable ? MH_EnableHook(g_block46Target) : MH_DisableHook(g_block46Target);
-		if (rc != MH_OK)
+		if (!t7patch_d3dcompiler46_hide_file(enable))
+			d3dc_block_write_log("46 file: requested state NOT applied - see the line above");
+
+		if (g_block46Created && enable != (g_block46Enabled != 0))
 		{
-			d3dc_block_write_log("toggle FAILED rc=%d", (int)rc);
-			return;
+			MH_STATUS rc = enable ? MH_EnableHook(g_block46Target) : MH_DisableHook(g_block46Target);
+			if (rc != MH_OK)
+			{
+				d3dc_block_write_log("toggle FAILED rc=%d", (int)rc);
+				return;
+			}
+
+			g_block46Enabled = enable ? 1 : 0;
+			d3dc_block_write_log(enable ? "block ENABLED from menu" : "block DISABLED from menu");
 		}
 
-		g_block46Enabled = enable ? 1 : 0;
-		d3dc_block_write_log(enable ? "block ENABLED from menu" : "block DISABLED from menu");
-		t7patch_config_set_block46(enable);
 		t7patch_config_save();
 	}
 
 	bool IsD3DCompilerBlockEnabled()
 	{
-		return g_block46Enabled != 0;
+		// [LOCAL] The checkbox shows the SETTING, not the hook state.  The
+		// hook is only the fallback layer and may legitimately not exist
+		// (MinHook failure) while the file move still does the job; echoing
+		// the hook state here would draw the switch as "off" while it works.
+		return t7patch_block_d3dcompiler46_enabled();
 	}
 
 	int GetD3DCompilerBlockCount()

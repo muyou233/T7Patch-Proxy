@@ -544,9 +544,11 @@ void RunPatching()
 	// Apply MinHook hooks
 	hooks::ApplyHooks();
 
-	// [LOCAL] Block in-process loading of the legacy d3dcompiler_46.dll.
+	// [LOCAL] Arm the fallback layer of the legacy d3dcompiler_46 opt-out.
 	// Must run after MH_Initialize (ApplyHooks' hooks stay enabled through
 	// their own MH_EnableHook(MH_ALL_HOOKS); this hook enables itself).
+	// The file move that actually hides the module runs earlier - see
+	// D3DCBlockEarlyThread() below.
 	hooks::InstallD3DCompilerBlock();
 
 	// Apply Memory patches
@@ -636,21 +638,29 @@ EXPORT void Unload()
     CloseHandle(hThreadSnap);
 }
 
-// [LOCAL] Early-arming thread for the legacy d3dcompiler_46 block.  The game
-// loads d3dcompiler_46.dll during renderer initialisation, which can happen
-// before RunPatching() runs, so the hook must be installed early - but not so
-// early that the (non-atomic) code-byte patch could race with another thread
-// executing LoadLibraryExW.  The loader lock already delays this thread until
-// DLL loading is done; the extra 500 ms margin makes the installation
-// effectively single-threaded.  Timeline measured on this machine: library
-// resolution at +0.0 s, this thread free at ~+6.6 s, renderer device creation
-// at ~+14.4 s - so 500 ms costs nothing.
+// [LOCAL] Early-arming thread for the legacy d3dcompiler_46 opt-out.  It has
+// two jobs, both of which must land before the engine can reach for the file:
+//   1. the FILE MOVE (Protection.cpp) - the engine must never see
+//      d3dcompiler_46.dll, so this cannot wait for RunPatching();
+//   2. the LoadLibraryExW fallback hook - which must NOT be installed while
+//      another thread could be executing that very function, hence the margin
+//      below.  The loader lock already delays this thread until DLL loading is
+//      done; the extra 500 ms makes the (non-atomic) code-byte patch
+//      effectively single-threaded.
+// Timeline measured on this machine: library resolution at +0.0 s, this thread
+// free at ~+6.6 s, renderer device creation at ~+14.4 s - so both the file move
+// (microseconds, and first) and the 500 ms margin cost the boot nothing.
 static DWORD WINAPI D3DCBlockEarlyThread(LPVOID)
 {
     // [LOCAL] Read t7patch.conf first so the block_d3dcompiler46 switch is
     // honoured on the very first launch.  This only parses the file - the
     // engine-dependent apply_settings() path still runs much later.
     t7patch_load_config_early();
+
+    // [LOCAL] Make the disk match the switch before anything can look at it,
+    // and log the real state either way.  This is file I/O, so it belongs on
+    // this thread rather than under DllMain's loader lock.
+    t7patch_d3dcompiler46_reconcile();
 
     Sleep(500);
     hooks::InstallD3DCompilerBlock();
@@ -680,9 +690,10 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         // The patching itself is NOT started here - see proxy/Proxy.cpp.
         ProxyResolveExports();
 
-        // [LOCAL] Arm the d3dcompiler_46 block now.  This module is statically
-        // imported by BlackOps3.exe, so this DllMain runs before any game code;
-        // the thread below starts as soon as the loader lock is released.
+        // [LOCAL] Arm the d3dcompiler_46 opt-out now.  This module is
+        // statically imported by BlackOps3.exe, so this DllMain runs before
+        // any game code; the thread below starts as soon as the loader lock is
+        // released, and both hides the file and installs the fallback hook.
         CreateThread(nullptr, 0, D3DCBlockEarlyThread, nullptr, 0, nullptr);
         break;
     }

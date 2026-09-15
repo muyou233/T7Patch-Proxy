@@ -172,6 +172,14 @@ void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
 void t7patch_cfg_set_menu_auto_open(bool v); // menu-side auto-open switch
 void t7patch_config_set_block46(bool enable); // menu-side 46 switch (memory)
+// [LOCAL] The 46 opt-out's FILE layer (Protection.cpp).  The switch renames
+// <game>\d3dcompiler_46.dll to d3dcompiler_46.dll.bak and back, so the engine
+// cannot find the legacy compiler at all - see the comment there for why a
+// rename replaced the old LoadLibraryExW hook.  state: 0 = .dll present,
+// 1 = only .bak, 2 = neither, 3 = both.
+int  t7patch_d3dcompiler46_file_state();
+bool t7patch_d3dcompiler46_hide_file(bool hide);
+void t7patch_d3dcompiler46_reconcile();
 void t7patch_config_save();                   // persist config + apply live settings
 // [LOCAL] Field accessors for the overlay menu's settings panel.
 void t7patch_cfg_playername(char* dst, size_t dstSize); // [LOCAL] copies under the config lock (dstSize 16)

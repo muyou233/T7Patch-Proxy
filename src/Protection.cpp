@@ -1,6 +1,7 @@
 #include "Protection.h"
 #include "Hooks.h"   // [LOCAL] EnableUiModelPathLog (UI-model path observer)
 #include "overlay.h" // [LOCAL] NotifyMainMenuReached (menu_auto_open timing)
+#include "t7patch_log.h" // [LOCAL] the 46-file renames go to the patch's single log
 
 #include <mutex>  // [LOCAL] guards the config object, friends_set and dlcContent
 #include <atomic> // [LOCAL] the config apply hand-off flag (menu Save -> MainThread)
@@ -744,8 +745,9 @@ struct patch_config
     // hold and there is nothing left to own, free, or lose.  It also makes the
     // whole object trivially copyable, which is what capture/publish need.
     char networkpassword[1024];
-    // [LOCAL] 1 = intercept in-process loads of the legacy d3dcompiler_46.dll
-    // (see hooks::InstallD3DCompilerBlock).  Default ON; write
+    // [LOCAL] 1 = at launch, rename the game's legacy d3dcompiler_46.dll to
+    // d3dcompiler_46.dll.bak so the engine cannot use it (see
+    // t7patch_d3dcompiler46_reconcile).  Default ON; write
     // block_d3dcompiler46=0 into t7patch.conf and restart the game to disable.
     int block_d3dcompiler46;
     // [LOCAL] ImGui menu: hotkey virtual-key code (default VK_INSERT = 45)
@@ -889,7 +891,7 @@ struct patch_config
         outfile << "networkpassword=" << v.networkpassword << std::endl;
         outfile << std::endl;
 
-        outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
+        outfile << "# 启动时把游戏目录的 d3dcompiler_46.dll 改名为 .bak，隔离旧版着色器编译器，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
         outfile << "block_d3dcompiler46=" << v.block_d3dcompiler46 << std::endl;
         outfile << std::endl;
 
@@ -1152,6 +1154,215 @@ void t7patch_config_set_block46(bool enable)
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.block_d3dcompiler46 = enable ? 1 : 0;
+}
+
+// [LOCAL] ============================================================
+//  Legacy shader-compiler opt-out - the FILE layer.
+//
+//  Same feature the toggle has always described.  "Block the legacy shader
+//  compiler" shipped in 3.07 and - as of 2026-09-15 - had never actually been
+//  exercised end to end, so the work below is its first real test, not a new
+//  mechanism.  What that first test showed: the original LoadLibraryExW hook,
+//  which answered "not found" for d3dcompiler_46.dll, logged itself armed and
+//  never once fired across four measured sessions, the module never appeared
+//  in the process, and the file's last-access time never moved - it was
+//  answering a question the game never asked.  The one fact this feature was
+//  built on is "with the file gone, the game behaves", and a rename changes
+//  exactly that fact: it is visible to every API, to directory enumeration
+//  and to other processes (Steam, the driver), none of which a hook can cover.
+//
+//  switch on  -> <game>\d3dcompiler_46.dll     -> <game>\d3dcompiler_46.dll.bak
+//  switch off -> <game>\d3dcompiler_46.dll.bak -> <game>\d3dcompiler_46.dll
+//
+//  The parked copy keeps the ".bak" suffix and stays next to BlackOps3.exe.
+//  That is deliberate: the loader only ever asks for the exact name
+//  "d3dcompiler_46.dll", so a suffixed file is as invisible to the engine as
+//  a moved one, and someone who uninstalls the patch by deleting d3d11.dll
+//  finds the original right where it belongs instead of having to know about
+//  T7Patch\.  Nothing accumulates either: the destination name is a constant
+//  and the move replaces whatever is already there (see hide_file below), so
+//  a Steam integrity check that re-downloads the file simply means the next
+//  launch overwrites the parked copy with the fresh one.
+//
+//  The state follows the switch, not the session.  It is re-applied at every
+//  launch (before the engine can look at the file, see dllmain.cpp), so a
+//  hard kill - or a Steam integrity check that brought the file back -
+//  heals itself on the next run.
+//
+//  One rule governs both directions: the .dll in the game folder is the
+//  authoritative copy.  Hiding replaces the parked file with it, and
+//  restoring refuses to overwrite it - a re-downloaded .dll may be newer
+//  than the copy we parked, so the patch never writes over it.
+// ============================================================
+
+namespace
+{
+    // Both candidate paths, built from the MAIN MODULE location.  Same
+    // reasoning as t7log::BuildPaths: the process working directory is not
+    // necessarily the game folder, so a relative path could move a file
+    // somewhere else entirely.  The last separator is found by hand to keep
+    // this free of extra CRT headers.
+    bool d3dc46_build_paths(wchar_t* dllOut, size_t dllCap, wchar_t* bakOut, size_t bakCap)
+    {
+        wchar_t exe[MAX_PATH] = {};
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH)
+            return false;
+
+        size_t cut = 0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            if (exe[i] == L'\\' || exe[i] == L'/')
+                cut = i;
+        }
+        if (cut == 0)
+            return false;
+        exe[cut] = L'\0';
+
+        if (swprintf_s(dllOut, dllCap, L"%s\\d3dcompiler_46.dll", exe) < 0)
+            return false;
+        return swprintf_s(bakOut, bakCap, L"%s\\d3dcompiler_46.dll.bak", exe) >= 0;
+    }
+
+    const char* d3dc46_state_name(int state)
+    {
+        switch (state)
+        {
+        case 0:  return "visible";
+        case 1:  return "hidden";
+        case 3:  return "both copies present";
+        default: return "file not found";
+        }
+    }
+}
+
+// 0 = d3dcompiler_46.dll sits in the game folder, 1 = only the .bak is there,
+// 2 = neither copy exists, 3 = both.  Reads the DISK, never the config: the
+// menu must be able to show that the rename failed instead of echoing the
+// value we asked for.
+int t7patch_d3dcompiler46_file_state()
+{
+    wchar_t dll[MAX_PATH] = {};
+    wchar_t bak[MAX_PATH] = {};
+    if (!d3dc46_build_paths(dll, MAX_PATH, bak, MAX_PATH))
+        return 2;
+
+    const bool hasDll = GetFileAttributesW(dll) != INVALID_FILE_ATTRIBUTES;
+    const bool hasBak = GetFileAttributesW(bak) != INVALID_FILE_ATTRIBUTES;
+    if (hasDll && hasBak)
+        return 3;
+    if (hasDll)
+        return 0;
+    if (hasBak)
+        return 1;
+    return 2;
+}
+
+// Applies the wanted on-disk state; true when the disk matches the request
+// afterwards.  Every failure is logged with its Win32 error - a read-only
+// game folder (Program Files without elevation) is the realistic one, and the
+// switch must not pretend it worked when it did not.
+bool t7patch_d3dcompiler46_hide_file(bool hide)
+{
+    wchar_t dll[MAX_PATH] = {};
+    wchar_t bak[MAX_PATH] = {};
+    if (!d3dc46_build_paths(dll, MAX_PATH, bak, MAX_PATH))
+    {
+        t7log::Append("block", "46 file: cannot resolve the game folder");
+        return false;
+    }
+
+    const bool hasDll = GetFileAttributesW(dll) != INVALID_FILE_ATTRIBUTES;
+    const bool hasBak = GetFileAttributesW(bak) != INVALID_FILE_ATTRIBUTES;
+
+    if (hide)
+    {
+        if (!hasDll)
+        {
+            // Already hidden (an earlier session) or genuinely absent (a
+            // Steam "verify" that removed it).  Nothing to hide either way,
+            // and the requested state is satisfied.
+            return true;
+        }
+
+        // A .bak that is still there means the file came back - in practice a
+        // Steam integrity check re-downloading it.  The destination name is a
+        // constant, so the game folder never accumulates copies: there is
+        // exactly one .bak and it always holds the newest downloaded .dll.
+        if (hasBak)
+            t7log::Append("block", "46 file: stale parked copy found - replacing it");
+
+        // MOVEFILE_REPLACE_EXISTING is what makes the sentence above true: the
+        // destination is deleted and the source takes its place, in one call.
+        // Without it the second launch of this scenario would fail with
+        // ERROR_ALREADY_EXISTS and leave the .dll sitting in the game folder,
+        // where the engine can see it.  The .dll in the game folder is always
+        // the authoritative copy.
+        if (!MoveFileExW(dll, bak, MOVEFILE_REPLACE_EXISTING))
+        {
+            char msg[160] = {};
+            snprintf(msg, sizeof(msg), "46 file: hide FAILED err=%lu",
+                (unsigned long)GetLastError());
+            t7log::Append("block", msg);
+            return false;
+        }
+        t7log::Append("block", "46 file: hidden (renamed to d3dcompiler_46.dll.bak)");
+        return true;
+    }
+
+    if (!hasBak)
+        return true; // nothing of ours to put back
+
+    //  A .dll sitting next to our .bak is the AUTHORITATIVE copy - in practice
+    //  a Steam update or integrity check that re-downloaded the file while it
+    //  was parked, and that download can be a NEWER build than the one we
+    //  kept.  The hide path below already calls the game-folder .dll
+    //  authoritative; the restore path must agree, or it would silently
+    //  downgrade a game file by moving the older .bak over it.  Keep the .dll
+    //  and drop our own leftover instead.  (Only reachable with the switch
+    //  OFF and both copies on disk: a verify during play, then switching this
+    //  off before the next launch.)
+    if (hasDll)
+    {
+        if (!DeleteFileW(bak))
+        {
+            char msg[160] = {};
+            snprintf(msg, sizeof(msg), "46 file: stale .bak not removed err=%lu",
+                (unsigned long)GetLastError());
+            t7log::Append("block", msg);
+            return true; // the requested state (file usable in the game folder) holds
+        }
+        t7log::Append("block",
+            "46 file: kept the game folder .dll as authoritative, removed our stale .bak");
+        return true;
+    }
+
+    if (!MoveFileExW(bak, dll, MOVEFILE_REPLACE_EXISTING))
+    {
+        char msg[160] = {};
+        snprintf(msg, sizeof(msg), "46 file: restore FAILED err=%lu",
+            (unsigned long)GetLastError());
+        t7log::Append("block", msg);
+        return false;
+    }
+    t7log::Append("block", "46 file: restored (d3dcompiler_46.dll.bak renamed back to .dll)");
+    return true;
+}
+
+// Startup reconciliation, called from the DllMain-era thread (dllmain.cpp)
+// long before the renderer initialises.  Always logs one line carrying the
+// REAL state, so "did the switch do anything?" is answerable from the log.
+void t7patch_d3dcompiler46_reconcile()
+{
+    const bool wantHidden = t7patch_block_d3dcompiler46_enabled();
+    const bool applied = t7patch_d3dcompiler46_hide_file(wantHidden);
+
+    char msg[192] = {};
+    snprintf(msg, sizeof(msg), "46 file: startup %s (switch=%s)%s",
+        d3dc46_state_name(t7patch_d3dcompiler46_file_state()),
+        wantHidden ? "hide" : "show",
+        applied ? "" : "  -- REQUESTED STATE NOT APPLIED");
+    t7log::Append("block", msg);
 }
 
 // [LOCAL] Persist the current config to disk AND apply the live settings, so
