@@ -17,11 +17,15 @@ namespace overlay
     // D3D11CreateDeviceAndSwapChain.
     void OnSwapChainCreated(void* swapChain, void* device, void* immediateContext);
 
-    // [LOCAL] Called by Protection.cpp once the overlay gate opens (online
-    // Demonware sign-in, or the front-end-uptime fallback when the game is
-    // offline - see MainThread).  Arms the hotkey, and opens the menu right
-    // away when menu_auto_open is set.
-    void NotifyMainMenuReached();
+    // [LOCAL] Called by Protection.cpp when the overlay gate opens - and since
+    // 2026-09-15 the only way it can open is the measured main-menu label signal
+    // (the timer fallback was removed; see MainThread).  Arms the hotkey
+    // immediately, and when menu_auto_open is set *schedules* the menu to open
+    // 1.5 s later (a menu that is already on screen the instant the player
+    // arrives reads as "it was waiting for me" - see kAutoOpenDelayMs); a press
+    // of the hotkey in the meantime cancels the scheduled open.  `reason` is what
+    // gets logged, so the log always says WHICH signal opened the gate.
+    void NotifyMainMenuReached(const char* reason = "main menu reached");
 
     // [LOCAL] Write a line to the patch's log (T7Patch\t7patch.log, tagged
     // "overlay") from other translation units - Protection.cpp's gate, Hooks.cpp's

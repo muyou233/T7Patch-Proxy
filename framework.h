@@ -166,7 +166,6 @@ inline void t7patch_ensure_data_dir()
 void t7patch_load_config_early();
 bool t7patch_block_d3dcompiler46_enabled();
 int t7patch_menu_key();          // virtual-key code that toggles the overlay (default VK_INSERT)
-int t7patch_menu_gate();         // 1 = default gate (online sign-in + offline fallback), 0 = strict
 int t7patch_cfg_menu_lang();     // overlay language: 1 = Chinese (default), 0 = English
 void t7patch_cfg_set_menu_lang(int value);
 void t7patch_cfg_set_menu_key(int vk);
@@ -175,19 +174,19 @@ void t7patch_cfg_set_menu_auto_open(bool v); // menu-side auto-open switch
 void t7patch_config_set_block46(bool enable); // menu-side 46 switch (memory)
 void t7patch_config_save();                   // persist config + apply live settings
 // [LOCAL] Field accessors for the overlay menu's settings panel.
-const char* t7patch_cfg_playername();
+void t7patch_cfg_playername(char* dst, size_t dstSize); // [LOCAL] copies under the config lock (dstSize 16)
 const char* t7patch_game_playername(); // game's own current name (menu fallback)
 void t7patch_cfg_set_playername(const char* v);
 bool t7patch_cfg_friends_only();
 void t7patch_cfg_set_friends_only(bool v);
-const char* t7patch_cfg_network_password();
+void t7patch_cfg_network_password(char* dst, size_t dstSize); // [LOCAL] copies under the config lock (dstSize 1024)
 void t7patch_cfg_set_network_password(const char* v);
 
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")
-// [LOCAL] Split so the overlay title can say "T7Patch 3.07" while the game
-// window text keeps "Patch 3.07" - bump ZBR_VERSION only.
-#define ZBR_VERSION "3.07"
+// [LOCAL] Split so the overlay title can say "T7Patch <ver>" while the game
+// window text keeps "Patch <ver>" - bump ZBR_VERSION only.
+#define ZBR_VERSION "3.08"
 #define ZBR_VERSION_FULL "Patch " ZBR_VERSION
 #define SPOOF_UNLOCK_ALL false
 #define SPOOF_SKIP_CWL false

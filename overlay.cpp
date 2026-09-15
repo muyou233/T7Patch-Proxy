@@ -18,9 +18,11 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <dxgi1_2.h> // IDXGIFactory2 / CreateSwapChainForHwnd live here, not in dxgi.h
+#include <shellapi.h>    // ShellExecuteA - the bottom-right link hands the URL to the shell
 #include "overlay.h"
 #include "Hooks.h"       // [LOCAL] 46-block runtime toggle + interception counter
 #include "t7patch_log.h" // [LOCAL] the patch's single runtime log
+#include "GithubMark.h"  // [LOCAL] embedded alpha mask for the bottom-right link
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 #include "imgui/backends/imgui_impl_win32.h"
@@ -38,6 +40,20 @@ namespace
     // #FF7501 = rgb(255,117,1) = HSV(27, 99%, 100%), on near-black.
     constexpr ImVec4 kAccent = ImVec4(1.000f, 0.459f, 0.004f, 1.00f);  // #FF7501
     constexpr ImVec4 kTextMain = ImVec4(0.925f, 0.925f, 0.925f, 1.00f);
+
+    // [LOCAL] Target of the GitHub mark pinned to the panel's bottom-right
+    // corner.  Hard-coded on purpose: the icon opens it via the shell, so
+    // anything user-editable here would be an injection vector for no gain.
+    constexpr const char* kRepoUrl = "https://github.com/muyou233/T7Patch-src";
+
+    // [LOCAL] The mark is drawn from an alpha mask (GithubMark.h) into a WHITE
+    // texture, so these two colours are a pure tint - the icon can be recoloured
+    // here without regenerating the art.  Rest matches the dimmed hint text it
+    // sits next to; hover switches to the accent so the icon reads as clickable
+    // (the buttons in the cards deliberately have no hover tint, but a link has
+    // nothing else to signal "press me").
+    constexpr ImVec4 kIconRest = ImVec4(0.720f, 0.720f, 0.720f, 1.00f);
+    constexpr ImVec4 kIconHover = kAccent;
 
     void ApplyOverlayTheme()
     {
@@ -84,6 +100,13 @@ namespace
     IDXGISwapChain* g_swapChain = nullptr;
     HWND g_hwnd = nullptr;
 
+    // [LOCAL] Shader resource view for the bottom-right GitHub mark.  Built once
+    // from the embedded alpha mask (GithubMark.h) in InitImGuiLocked(), which is
+    // the first point where the device is known; owned for the process lifetime
+    // exactly like g_device above.  Null means "icon unavailable" and the draw
+    // path simply skips it.
+    ID3D11ShaderResourceView* g_linkIconSrv = nullptr;
+
     // [LOCAL] Cross-thread flags: written from the game thread (capture /
     // main-menu notify), from the WndProc thread (hotkey) and read every
     // frame by the render thread - atomics keep that honest.
@@ -94,6 +117,15 @@ namespace
     int g_warmupFrames = 0;
     std::atomic<bool> g_menuOpen{ false };
     std::atomic<bool> g_mainMenuReached{ false }; // Insert is ignored until the main menu is up
+    // [LOCAL] Deferred auto-open.  The gate opens the moment the main-menu
+    // labels are rendered, which is a beat before the front-end has actually
+    // settled - a menu that is already sitting on screen when the player
+    // arrives reads as "it was waiting for me".  Opening kAutoOpenDelayMs later
+    // makes it feel like a reply instead.  Passed by NotifyMainMenuReached,
+    // consumed by HookPresent; 0 = nothing pending, and a press of the hotkey
+    // cancels it (see OverlayWndProc).
+    constexpr unsigned long long kAutoOpenDelayMs = 1500;
+    std::atomic<unsigned long long> g_autoOpenDueMs{ 0 };
     // [LOCAL] "hotkey ignored" is logged once per session (see OverlayWndProc);
     // only the window thread touches this.
     bool g_hotkeyIgnoredLogged = false;
@@ -120,8 +152,20 @@ namespace
     // each row's own Save button (checkboxes apply instantly instead).
     char g_playerNameBuf[16] = {};
     char g_passwordBuf[1024] = {};
-    bool g_editBufsLoaded = false;
-    const ULONGLONG g_sessionStart = GetTickCount64();
+    // [LOCAL] Atomic, per the rule stated for the flags at the top of this
+    // file: the WndProc thread clears g_editBufsLoaded when the hotkey opens
+    // the menu (see OverlayWndProc), while the render thread reads it and does
+    // the (re)load in DrawMenu.  g_playerNameAutofill is only touched by the
+    // render thread today, but it is read in the same per-frame block, so
+    // keeping the pair consistent is cheaper than remembering which one is safe.
+    std::atomic<bool> g_editBufsLoaded{ false };
+    // [LOCAL] True while the name box is still waiting for the ENGINE to come
+    // up with a name (see the poll in DrawMenu).  Only ever affects the name
+    // row, and only while its buffer is empty and untouched by the user.
+    std::atomic<bool> g_playerNameAutofill{ false };
+    // [LOCAL] A g_sessionStart timestamp used to live here, feeding a "session
+    // uptime" readout that was removed from the menu; nothing reads it any more
+    // (and it never did after that readout was dropped).
 
     // IDXGISwapChain vtable: IUnknown(0-2), IDXGIObject(3-5),
     // IDXGIDeviceSubObject(6), GetDevice(7), Present(8).
@@ -193,6 +237,7 @@ namespace
         const char* friendsOnlyTip;
         const char* autoOpen;
         const char* autoOpenTip;
+        const char* about;
     };
 
     constexpr MenuText kTextZh = {
@@ -205,12 +250,13 @@ namespace
         "按 %s 呼出/隐藏本窗口",
         "在进程内拦截旧版 d3dcompiler_46.dll。\n"
         "修复地图加载 / 首次特效时的卡顿。\n"
-        "保存到 t7patch.conf，重启后保持。",
+        "重启后保持。",
         "仅好友可以邀请/加入你。\n"
-        "立即生效并保存到 t7patch.conf。",
+        "立即生效，重启后保持。",
         "自动打开窗口",
         "进入主菜单后自动打开本窗口。\n"
-        "立即生效并保存到 t7patch.conf。"
+        "下次启动生效。",
+        "关于"
     };
     constexpr MenuText kTextEn = {
         "SETTINGS", "TOGGLES", "STATUS", "CONFIG",
@@ -222,12 +268,13 @@ namespace
         "Press %s to toggle this window",
         "Intercepts the legacy d3dcompiler_46.dll in-process.\n"
         "Fixes the map-load / first-effect hitching.\n"
-        "Saved to t7patch.conf, survives restarts.",
+        "Kept across restarts.",
         "Only friends can invite/join you.\n"
-        "Applies instantly and saves to t7patch.conf.",
+        "Applies instantly and is kept across restarts.",
         "Auto-open in main menu",
         "Opens this window automatically once the main menu is up.\n"
-        "Applies instantly and saves to t7patch.conf."
+        "Takes effect on the next launch.",
+        "About"
     };
 
     const MenuText* L()
@@ -339,19 +386,54 @@ namespace
         // config directly - no buffer involved.
         if (!g_editBufsLoaded)
         {
-            // Player name: the conf value wins; when the conf has none, show
-            // the game's CURRENT name so the box is never blank and the user
-            // sees what the game is actually using.
-            const char* confName = t7patch_cfg_playername();
-            if (confName && confName[0] != '\0')
+            // Player name: the conf value wins; when the conf has none, the
+            // game's CURRENT name is shown instead, so the box is never blank
+            // and the user sees what the game is actually using.  That fallback
+            // is NOT resolved here though - see the poll below.
+            // [LOCAL] Both getters copy under Protection.cpp's config lock, so
+            // by the time we look at the value it is already a private snapshot
+            // - the old versions handed back a pointer into the shared config
+            // and the copy below happened after the lock was released.
+            char confName[16];
+            t7patch_cfg_playername(confName, sizeof(confName));
+            if (confName[0] != '\0')
+            {
                 strncpy_s(g_playerNameBuf, sizeof(g_playerNameBuf), confName, _TRUNCATE);
+                g_playerNameAutofill = false;
+            }
             else
-                strncpy_s(g_playerNameBuf, sizeof(g_playerNameBuf),
-                    t7patch_game_playername(), _TRUNCATE);
+            {
+                g_playerNameBuf[0] = '\0';
+                g_playerNameAutofill = true;
+            }
 
-            strncpy_s(g_passwordBuf, sizeof(g_passwordBuf),
-                t7patch_cfg_network_password(), _TRUNCATE);
+            t7patch_cfg_network_password(g_passwordBuf, sizeof(g_passwordBuf));
             g_editBufsLoaded = true;
+        }
+
+        // [LOCAL] Poll the engine's own name until it produces one.
+        //
+        // Why this exists: the engine writes its player name into pNameBuffer
+        // only after the online profile has finished loading, while the menu is
+        // auto-opened the very instant the main menu shows up.  Those two raced
+        // on 2026-09-15 - the one-shot read above caught an empty buffer,
+        // latched it, and the box stayed blank for the WHOLE session (closing
+        // and reopening the menu was the only cure).  It read as a random
+        // glitch because the profile load beating the menu is the common case,
+        // not a guaranteed one.
+        //
+        // So keep asking, every frame the menu is open, until it answers.  It
+        // stops the moment the user types (their input is never overwritten) or
+        // a name arrives; a non-empty conf name never reaches this path at all.
+        // Cost: one strncpy_s of at most 15 bytes, and only while unresolved.
+        if (g_playerNameAutofill)
+        {
+            const char* gameName = t7patch_game_playername();
+            if (gameName && gameName[0] != '\0')
+            {
+                strncpy_s(g_playerNameBuf, sizeof(g_playerNameBuf), gameName, _TRUNCATE);
+                g_playerNameAutofill = false;
+            }
         }
 
         // [LOCAL] Fixed layout: the panel is laid out for exactly this size.
@@ -393,12 +475,21 @@ namespace
                 ImGui::TextUnformatted(L()->playerName);
                 ImGui::TableSetColumnIndex(1);
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                ImGui::InputText("##playername", g_playerNameBuf, sizeof(g_playerNameBuf));
+                // InputText returns true whenever it modified the buffer, so
+                // this is exactly "the user is typing" - and the strongest
+                // signal to stop auto-filling over their input.
+                if (ImGui::InputText("##playername", g_playerNameBuf, sizeof(g_playerNameBuf)))
+                    g_playerNameAutofill = false;
+                // A focused-but-not-yet-typed field counts as taken over too:
+                // never drop a name in under the user's cursor.
+                if (ImGui::IsItemActive())
+                    g_playerNameAutofill = false;
                 ImGui::TableSetColumnIndex(2);
                 if (ImGui::Button("Save##playername", ImVec2(-FLT_MIN, 0.0f)))
                 {
                     t7patch_cfg_set_playername(g_playerNameBuf);
                     t7patch_config_save();
+                    g_playerNameAutofill = false;
                 }
 
                 // Row 2: room password
@@ -500,6 +591,62 @@ namespace
             else
                 snprintf(hint, sizeof(hint), L()->hint, VkName(t7patch_menu_key()));
             ImGui::TextDisabled("%s", hint);
+
+            // [LOCAL] GitHub mark, pinned to the panel's bottom-right corner.
+            // It shares the hint's line so it costs NO extra panel height (the
+            // panel is a fixed 395x440 and the slack is spoken for), and it is
+            // anchored from the RIGHT - content right edge minus the item width
+            // - rather than appended after the hint: while capturing a hotkey
+            // the hint swaps to the "press a key" prompt, and a left-anchored
+            // item would be dragged around by the changing hint width.
+            // SameLine()'s offset is window-local from the window's left edge,
+            // so "Size - padding" is the content's right edge (the window is
+            // NoScrollbar, so there is no scrollbar width to subtract).
+            //
+            // InvisibleButton + AddImage rather than ImageButton: ImageButton
+            // always paints the regular button background behind the image,
+            // which would drop a grey square onto the panel.  Same hand-drawn
+            // pattern SolidCheckbox above uses.  The hit area is a few pixels
+            // wider than the glyph so it is comfortable to click.
+            const float iconSize = ImGui::GetTextLineHeight();
+            constexpr float kIconPad = 4.0f;
+            const float iconItemWidth = iconSize + kIconPad * 2.0f;
+            ImGui::SameLine(ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x
+                - iconItemWidth);
+            const bool linkPressed = ImGui::InvisibleButton("##githublink",
+                ImVec2(iconItemWidth, iconSize));
+            const bool linkHovered = ImGui::IsItemHovered();
+            const ImVec2 linkMin = ImGui::GetItemRectMin();
+            const ImVec2 linkMax = ImGui::GetItemRectMax();
+
+            if (g_linkIconSrv)
+            {
+                ImGui::GetWindowDrawList()->AddImage(
+                    (ImTextureID)(intptr_t)g_linkIconSrv,
+                    ImVec2(linkMin.x + kIconPad, linkMin.y),
+                    ImVec2(linkMax.x - kIconPad, linkMax.y),
+                    ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
+                    ImGui::GetColorU32(linkHovered ? kIconHover : kIconRest));
+            }
+
+            if (linkHovered)
+            {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                // Label only.  The URL is deliberately NOT part of the tooltip -
+                // a raw "https://github.com/..." line reads like debug output
+                // next to the rest of the panel's copy.
+                ImGui::SetTooltip("%s", L()->about);
+            }
+
+            if (linkPressed)
+            {
+                // [LOCAL] Hand the URL to the shell so it opens in the default
+                // browser.  A failure is logged, not surfaced in the UI - there
+                // is nothing the player could do about it mid-match.
+                if ((INT_PTR)ShellExecuteA(nullptr, "open", kRepoUrl,
+                        nullptr, nullptr, SW_SHOWNORMAL) <= 32)
+                    overlay_log("github link: ShellExecuteA failed");
+            }
         }
 
         ImGui::End();
@@ -508,6 +655,80 @@ namespace
     // -----------------------------------------------------------------
     //  Init helpers
     // -----------------------------------------------------------------
+
+    // [LOCAL] Build the GitHub mark texture from the embedded alpha mask.
+    // RGBA8 with RGB forced to WHITE: the DX11 backend multiplies the vertex
+    // colour by the sampled texel, so a white texture turns the per-frame draw
+    // tint into the icon's actual colour (see kIconRest / kIconHover).  The
+    // source art is black-on-transparent, so only its alpha is meaningful here.
+    // Caller must hold g_overlayMutex.
+    void CreateLinkIconTextureLocked()
+    {
+        if (g_linkIconSrv || !g_device)
+            return;
+
+        constexpr int kSize = kGithubMarkSize;
+        static_assert(kGithubMarkSize * kGithubMarkSize * 2 == sizeof(kGithubMarkAlphaHex) - 1,
+            "GithubMark.h: mask length does not match kGithubMarkSize");
+
+        const auto hexNibble = [](char c) -> unsigned char
+        {
+            return (unsigned char)((c <= '9') ? (c - '0') : ((c | 0x20) - 'a' + 10));
+        };
+
+        unsigned char pixels[kSize * kSize * 4] = {};
+        for (int i = 0; i < kSize * kSize; ++i)
+        {
+            const char* hex = &kGithubMarkAlphaHex[i * 2];
+            // RGB is pinned to white on purpose; the draw-time tint supplies
+            // the actual colour.  (Deliberately written as three plain lines -
+            // a trailing backslash in a // comment would splice the NEXT line
+            // into the comment and silently drop an assignment.)
+            pixels[i * 4 + 0] = 0xFF;
+            pixels[i * 4 + 1] = 0xFF;
+            pixels[i * 4 + 2] = 0xFF;
+            pixels[i * 4 + 3] = (unsigned char)((hexNibble(hex[0]) << 4) | hexNibble(hex[1]));
+        }
+
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = kSize;
+        desc.Height = kSize;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_IMMUTABLE;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA init{};
+        init.pSysMem = pixels;
+        init.SysMemPitch = kSize * 4;
+
+        ID3D11Texture2D* texture = nullptr;
+        if (FAILED(g_device->CreateTexture2D(&desc, &init, &texture)))
+        {
+            overlay_log("link icon: CreateTexture2D FAILED (icon hidden)");
+            return;
+        }
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format = desc.Format;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+        const HRESULT hr = g_device->CreateShaderResourceView(texture, &srvDesc, &g_linkIconSrv);
+        texture->Release();
+
+        if (FAILED(hr))
+        {
+            g_linkIconSrv = nullptr;
+            overlay_log("link icon: CreateShaderResourceView FAILED (icon hidden)");
+        }
+        else
+        {
+            overlay_log("link icon texture created");
+        }
+    }
+
     bool InitImGuiLocked()
     {
         if (g_imguiReady || !g_device || !g_context || !g_swapChain || !g_hwnd)
@@ -574,6 +795,11 @@ namespace
             return false;
         if (!ImGui_ImplDX11_Init(g_device, g_context))
             return false;
+
+        // [LOCAL] Resource for the bottom-right link.  Independent of ImGui,
+        // but built here so it only exists once the overlay is actually up
+        // (and so a failed overlay init does not leak the texture).
+        CreateLinkIconTextureLocked();
 
         g_imguiReady = true;
         // [LOCAL] menu_auto_open fires later, on the first DLC ownership
@@ -665,6 +891,19 @@ namespace
     // -----------------------------------------------------------------
     HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags)
     {
+        // [LOCAL] Deferred auto-open.  Checked here rather than down in the
+        // frame block: during those 1.5 s the menu is still closed, so runFrame
+        // is false and that block is skipped - a pending open parked down there
+        // would never fire.
+        const unsigned long long autoOpenDue = g_autoOpenDueMs.load();
+        if (autoOpenDue != 0 && GetTickCount64() >= autoOpenDue)
+        {
+            g_autoOpenDueMs = 0;
+            g_menuOpen = true;
+            g_editBufsLoaded = false; // re-read the text buffers from the conf
+            overlay_log("menu AUTO-OPENED (1500 ms after the gate opened)");
+        }
+
         // [LOCAL] Menu-closed fast path: skip the entire ImGui frame.  A cooked
         // but empty frame still costs the DX11 backend's state save/restore on
         // every present (tens of microseconds per frame, ~0.5-1% at 144 FPS).
@@ -674,6 +913,16 @@ namespace
         const bool runFrame = g_menuOpen.load() || g_warmupFrames > 0;
         if (g_imguiReady.load() && runFrame)
         {
+            // [LOCAL] Time the first warm-up frame.  Its real work is ImGui's CJK
+            // font atlas: ~2500 glyphs get rasterised in one go the first time
+            // the DX11 backend is asked to build the font texture, which can
+            // show as a visible hitch.  Logging it turns "the picture stutters
+            // once at start-up" into a number that either matches what the user
+            // saw or rules the overlay out - guessing between "the patch" and
+            // "the game" is exactly what this line exists to stop.
+            const bool timedFrame = (g_warmupFrames == 2);
+            const unsigned long long frameStart = timedFrame ? GetTickCount64() : 0;
+
             if (g_warmupFrames > 0)
                 --g_warmupFrames;
 
@@ -686,6 +935,15 @@ namespace
 
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+            if (timedFrame)
+            {
+                char frameMsg[128]{};
+                snprintf(frameMsg, sizeof(frameMsg),
+                    "first warm-up frame took %llu ms (font atlas + first ImGui pipeline)",
+                    GetTickCount64() - frameStart);
+                overlay_log(frameMsg);
+            }
         }
 
         using PresentFn = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
@@ -794,6 +1052,11 @@ namespace
             }
             else
             {
+                // [LOCAL] Cancel a pending deferred auto-open: if the player
+                // already opened (or opened and closed) the menu themselves
+                // inside those 1.5 s, popping it back up would fight them.
+                g_autoOpenDueMs = 0;
+
                 // [LOCAL] Menu open/close is not logged on purpose: it is pure
                 // UI interaction, and one line per key press would drown the
                 // handful of lines that actually matter (start-up, gate, 46
@@ -845,7 +1108,7 @@ namespace overlay
         return g_titleDismissedMs.load();
     }
 
-    void NotifyMainMenuReached()
+    void NotifyMainMenuReached(const char* reason)
     {
         static bool notified = false;
         if (notified)
@@ -853,15 +1116,30 @@ namespace overlay
         notified = true;
         g_mainMenuReached = true;
 
+        // [LOCAL] The reason is part of the line on purpose: when two gate
+        // signals logged the same text, the 2026-09-15 title-screen popup (the
+        // timer fallback firing on an idle "按ENTER开始" screen) looked exactly
+        // like the real screen signal and took a log dig to attribute.  The
+        // timer is gone now, but the name stays - whoever reads this log next
+        // gets the answer for free.
+        char msg[192]{};
         if (t7patch_menu_auto_open())
         {
-            g_menuOpen = true;
-            overlay_log("menu AUTO-OPENED (main menu reached, menu_auto_open=1)");
+            // [LOCAL] Scheduled, not opened: see kAutoOpenDelayMs.  HookPresent
+            // performs the open and logs it, so this line says "in 1500 ms"
+            // rather than "AUTO-OPENED" - the old wording would have been a lie
+            // for 1.5 s.  The reason stays in this line, so the log still shows
+            // WHICH gate signal armed it.
+            g_autoOpenDueMs = GetTickCount64() + kAutoOpenDelayMs;
+            snprintf(msg, sizeof(msg), "menu auto-open in %llu ms (%s, menu_auto_open=1)",
+                kAutoOpenDelayMs, reason ? reason : "unknown");
         }
         else
         {
-            overlay_log("main menu reached (Insert now armed)");
+            snprintf(msg, sizeof(msg), "gate opened (%s; Insert now armed)",
+                reason ? reason : "unknown");
         }
+        overlay_log(msg);
     }
 
     void OnDeviceCreated(void* device, void* immediateContext)

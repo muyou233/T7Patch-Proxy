@@ -27,6 +27,13 @@ drop a single `d3d11.dll` into the game folder and you are done.
   - `friends_set` and the `dlcContent` cache were unsynchronized shared state; concurrent access could
     misjudge friends or crash. Both are now mutex-guarded, with Steam calls kept outside the lock
   - `hkqmemcpy`: the `size < 0` branch no longer writes to the source buffer (which may be read-only)
+  - the config object (player name / room password / toggles) was read and written from three threads
+    with no synchronization at all; it is now guarded by a single mutex, with engine calls kept
+    outside the lock and the string getters switched to caller-supplied buffers
+  - saving from the in-game menu used to write the file and stop there - the config watcher could not
+    see the process's own write, so the new value never reached the engine and renaming yourself
+    required a restart. Saves now hand the push to the background thread explicitly (~1 s, usually
+    ~100 ms)
 - **In-game ImGui overlay**: hooks Present, the window proc and the DXGI factory
   chain; card-style UI; hot-plugs the 46 block, applies config instantly,
   EN/中文 switch, custom hotkey
@@ -37,7 +44,7 @@ drop a single `d3d11.dll` into the game folder and you are done.
 
 1. Get `d3d11.dll` from the [Releases](../../releases) page (or build it yourself)
 2. Close the game, copy `d3d11.dll` next to `BlackOps3.exe`
-3. Launch the game — `Patch 3.07` in the top-right corner means success; a `T7Patch\` folder is created automatically
+3. Launch the game — `Patch 3.08` in the top-right corner means success; a `T7Patch\` folder is created automatically
 4. **Uninstall**: delete that `d3d11.dll`; the game files are never modified
 
 ## In-game menu
@@ -53,7 +60,8 @@ Press `Insert` (changeable in the menu) once you are on the main menu:
 - **Config**: English/Chinese switch and a custom hotkey (click the button, then press the
   new key; `ESC` cancels)
 - Game input is ignored while the menu is open, zero interference when it is closed
-- The hotkey only arms after the game is connected and the main menu is up
+- The hotkey only arms once the main menu is actually up; on the title screen and on the
+  connecting screen it does nothing
 
 ## Configuration
 
@@ -66,7 +74,7 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `networkpassword=` | room password, use together with friends-only |
 | `block_d3dcompiler46=` | `1` = block the legacy shader compiler (default on; also a menu toggle) |
 | `menu_key=` | virtual-key code that opens the menu (default `45` = Insert) |
-| `menu_auto_open=` | `1` = open the menu automatically at the main menu (default `0`) |
+| `menu_auto_open=` | `1` = open the menu automatically once the main menu is up, ~1.5 s after it appears (default `0`) |
 | `menu_lang=` | `1` = Chinese (default), `0` = English |
 
 ## Credits

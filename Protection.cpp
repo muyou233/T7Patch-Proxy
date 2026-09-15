@@ -2,7 +2,8 @@
 #include "Hooks.h"   // [LOCAL] EnableUiModelPathLog (UI-model path observer)
 #include "overlay.h" // [LOCAL] NotifyMainMenuReached (menu_auto_open timing)
 
-#include <mutex> // [LOCAL] guards for friends_set / dlcContent (see below)
+#include <mutex>  // [LOCAL] guards the config object, friends_set and dlcContent
+#include <atomic> // [LOCAL] the config apply hand-off flag (menu Save -> MainThread)
 
 bool has_set_window_text = false;
 bool Protection::IsFriendsOnly = false;
@@ -203,12 +204,47 @@ EXPORT void SetPlayerName(const char* name)
     {
         strncpy_s((char*)(pUserData + 0x8), 16, Protection::CustomName, sizeof(Protection::CustomName));
         strncpy_s((char*)(pNameBuffer), 16, Protection::CustomName, sizeof(Protection::CustomName));
+
+        // [LOCAL] Mirror the start-up write (see Protection::install()).  Those
+        // four locations hold strings the front-end has ALREADY built, and that
+        // is exactly why renaming from the menu used to need a game restart:
+        // install() wrote them once at start-up, this runtime path never did, so
+        // the Steam hooks answered with the new name while the UI kept drawing
+        // the old one out of its own copy.
+        //
+        // Same four targets as the start-up pass, and the same byte count
+        // (strlen+1, at most 16, since a name longer than 15 is rejected above).
+        // No new address is touched and no longer write happens, so this is no
+        // riskier than the pass that has always run in install().
+        const size_t nameBytes = strlen(Protection::CustomName) + 1;
+        memcpy((void*)REBASE(0x15E84638), Protection::CustomName, nameBytes);
+        memcpy((void*)PTR_Name1, Protection::CustomName, nameBytes);
+        memcpy((void*)PTR_Name2, Protection::CustomName, nameBytes);
+        if (!Protection::IsBadReadPtr((VOID*)s_playerData_ptr) && *(INT64*)s_playerData_ptr)
+        {
+            memset((void*)(*(INT64*)s_playerData_ptr + 0x8), 0, 16);
+            memcpy((void*)(*(INT64*)s_playerData_ptr + 0x8), Protection::CustomName, nameBytes);
+        }
+
+        // [LOCAL] One line per apply.  It answers, from the log alone, whether a
+        // name edit reached the engine at all - the other half of "I changed my
+        // name and the game still shows the old one".
+        char nameMsg[96]{};
+        snprintf(nameMsg, sizeof(nameMsg),
+            "playername applied to the front-end strings (%u bytes)", (unsigned)nameBytes);
+        overlay::DebugLog(nameMsg);
     }
 }
 
 EXPORT void SetNetworkPassword(const char* pass)
 {
-    if (strlen(pass) == 0 || !(*pass))
+    // [LOCAL] NULL guard.  This is reached from apply_settings() with whatever
+    // the config object holds at that instant, and the config watcher runs on
+    // another thread - the stored pointer used to be freed and reallocated
+    // there, so NULL was reachable and the very first statement (strlen) would
+    // dereference it.  The old condition, "strlen(pass) == 0 || !(*pass)", was
+    // also one test written twice: both spell "empty string".
+    if (pass == nullptr || *pass == '\0')
     {
         Protection::SetNetworkPassword(0);
     }
@@ -513,8 +549,32 @@ __int32 Protection::GetLobbyChatEntry(INT64 api, INT64 csteamidlobby, INT64 chat
     {
         char* msg = (char*)pvdata;
 
-        for (int i = 0; i < strlen(msg); i++)
+        // [LOCAL] Bounded version of the original strlen() walk.
+        //
+        // The payload is a Steam length-delimited buffer, but strlen() assumed
+        // a NUL terminator: a payload containing no NUL walked off the end of
+        // the buffer until it happened to meet an unrelated zero byte, and the
+        // two-byte lookahead at the final character read one past wherever it
+        // stopped.  Note cubdata is the CAPACITY the caller handed Steam (the
+        // byte count actually written is the return value), so it is a valid
+        // upper bound but not the message length - bounding by it alone would
+        // rewrite every byte up to the capacity instead of the message.
+        //
+        // So keep the original rule exactly - stop at the first NUL - and only
+        // remove the overrun.  For every input the old code handled correctly
+        // this picks the identical range; it differs only for the input that
+        // used to read out of bounds.
+        int msgCap = (int)cubdata;
+        if (msgCap < 0)
+            msgCap = 0;
+
+        int msgLen = 0;
+        while (msgLen < msgCap && msg[msgLen] != '\0')
+            ++msgLen;
+
+        for (int i = 0; i < msgLen; i++)
         {
+            const bool hasNext = (i + 1) < msgLen;
             if (msg[i] == '^')
             {
                 msg[i] = '.';
@@ -523,11 +583,11 @@ __int32 Protection::GetLobbyChatEntry(INT64 api, INT64 csteamidlobby, INT64 chat
             {
                 msg[i] = '.';
             }
-            else if (msg[i] == '$' && msg[i + 1] == '(')
+            else if (msg[i] == '$' && hasNext && msg[i + 1] == '(')
             {
                 msg[i] = '.';
             }
-            else if (msg[i] == '[' && msg[i + 1] == '{')
+            else if (msg[i] == '[' && hasNext && msg[i + 1] == '{')
             {
                 msg[i] = '.';
             }
@@ -600,12 +660,20 @@ void Protection::SwapSteamAPIPointer(__int64 hLibrary, int vPointerIndex, void* 
     auto OldProtection = 0ul;
     INT64* vtable = *(INT64**)steamLibrary;
 
-    if (SteamHAPIHooks.find(hLibrary) == SteamHAPIHooks.end())
+    // [LOCAL] Remember the ORIGINAL vtable entry, and only ever remember it
+    // once.  The old code stored whatever was in the slot on every call, which
+    // poisoned the table on uninstall: Protect::uninstall() calls
+    // SwapSteamAPIPointer(m, idx, GetOriginalSteamPtr(m, idx)) - the argument is
+    // evaluated first, then the body stores *(vtable + idx), and at that moment
+    // the slot already holds OUR thunk.  So the "original" recorded became the
+    // hook itself, and a later install would have been handed our own thunk as
+    // the function to call through -> infinite recursion.  Latent only because
+    // Unload() currently runs once; first-swap-wins removes it for good.
+    auto& slots = SteamHAPIHooks[hLibrary];
+    if (slots.find(vPointerIndex) == slots.end())
     {
-        SteamHAPIHooks[hLibrary] = std::unordered_map<int, __int64>();
+        slots[vPointerIndex] = *(vtable + vPointerIndex);
     }
-
-    SteamHAPIHooks[hLibrary][vPointerIndex] = *(vtable + vPointerIndex);
 
     VirtualProtect(reinterpret_cast<void*>(vtable + vPointerIndex), 8, PAGE_EXECUTE_READWRITE, &OldProtection);
     *reinterpret_cast<void**>(vtable + vPointerIndex) = CallFuncReplace;
@@ -634,11 +702,48 @@ bool fs_exists(const char* filename)
     return true;
 }
 
+// [LOCAL] THE config lock.  `user_config` is reached from three threads and
+// every one of those paths used to run unsynchronised:
+//   * MainThread     - polls the file's timestamp and, when it changed,
+//                      reloads and pushes the settings into the engine;
+//   * render thread  - DrawMenu() reads the settings to draw them and writes
+//                      them back on every edit, then calls
+//                      t7patch_config_save();
+//   * WndProc thread - reads menu_key / menu_auto_open on every key message.
+// What that cost, concretely: playername[16] could be read while loadfrom()
+// was mid-strcpy (a torn name in the box); a reader could observe a
+// HALF-APPLIED file (new playername next to the previous password) because
+// loadfrom() published field by field; and networkpassword could be caught
+// between free() and malloc(), handing strlen(NULL) to SetNetworkPassword.
+//
+// Two rules keep this cheap and deadlock-free, and they matter more than the
+// lock itself:
+//   1. It is NEVER held across an ENGINE call.  apply_settings() copies the
+//      values out under the lock and only then calls SetPlayerName /
+//      SetNetworkPassword - those are engine/Steam entry points that run
+//      arbitrary code, and locking around them is how you get a deadlock.
+//   2. It is never held across a file READ.  loadfrom() parses into a local
+//      copy and takes the lock only to publish it, so the render thread's
+//      per-frame reads are never stuck behind a disk read (the game folder can
+//      sit behind an AV scanner).  Hold time there is a few hundred ns.
+// The one piece of I/O the lock does cover is the ~1 KB write in saveto(),
+// which is what serialises the writers.
+std::mutex g_config_mutex;
+
 struct patch_config
 {
     char playername[16];
     int isfriendsonly;
-    char* networkpassword;
+    // [LOCAL] A fixed inline buffer, not a heap pointer.  The old `char*` was
+    // malloc'ed by the constructor and then free()/malloc()'ed by loadfrom()
+    // and t7patch_cfg_set_network_password() - from different threads.  That
+    // ownership dance is exactly what produced the NULL window (a reader
+    // landing between free() and malloc()) and the "operator<< on a null
+    // const char*" UB in saveto().  1023 bytes is the clamp every writer
+    // already applied, so an inline array expresses every value the file can
+    // hold and there is nothing left to own, free, or lose.  It also makes the
+    // whole object trivially copyable, which is what capture/publish need.
+    char networkpassword[1024];
     // [LOCAL] 1 = intercept in-process loads of the legacy d3dcompiler_46.dll
     // (see hooks::InstallD3DCompilerBlock).  Default ON; write
     // block_d3dcompiler46=0 into t7patch.conf and restart the game to disable.
@@ -649,38 +754,68 @@ struct patch_config
     int menu_auto_open;
     // [LOCAL] Overlay menu language: 1 = Chinese (default), 0 = English.
     int menu_lang;
-    // [LOCAL] Overlay gate: 1 = default (online main menu as soon as Live
-    // signs in, plus a front-end-uptime fallback so the offline main menu
-    // works too); 0 = strict (only arm after Live sign-in).
-    int menu_gate;
     bool exists;
     std::filesystem::file_time_type modified;
 
+    // [LOCAL] A flat copy of everything a config file can carry.  loadfrom()
+    // parses into one of these and publishes it in a single step, so a reader
+    // sees either the old file or the new one - never a mix of the two.
+    struct values
+    {
+        char playername[16];
+        int isfriendsonly;
+        char networkpassword[1024];
+        int block_d3dcompiler46;
+        int menu_key;
+        int menu_auto_open;
+        int menu_lang;
+    };
+
     patch_config()
     {
-        networkpassword = (char*)malloc(4);
-        memset(networkpassword, 0, 4);
+        memset(playername, 0, sizeof(playername));
+        memset(networkpassword, 0, sizeof(networkpassword));
         isfriendsonly = true;
         block_d3dcompiler46 = true;
         menu_key = 45;      // VK_INSERT
         menu_auto_open = 1; // auto-open on the main menu (user default)
         menu_lang = 1;      // Chinese by default
-        menu_gate = 1;      // default gate (online + offline fallback)
         exists = false;
         modified = std::filesystem::file_time_type();
-        __playername();
         // [LOCAL] Was: strcat_s(playername, "Unknown Soldier");
         // An empty playername now means "do not override the name the game
         // already has", so start with no custom name at all.  Set
         // playername=<name> in t7patch.conf to override it.
     }
 
-    void __playername()
+    // ------------------------------------------------------------------
+    //  Snapshot helpers.  Memory only - the caller holds g_config_mutex.
+    // ------------------------------------------------------------------
+    void capture_locked(values& v) const
     {
-        memset(playername, 0, 16);
+        memcpy(v.playername, playername, sizeof(v.playername));
+        v.isfriendsonly = isfriendsonly;
+        memcpy(v.networkpassword, networkpassword, sizeof(v.networkpassword));
+        v.block_d3dcompiler46 = block_d3dcompiler46;
+        v.menu_key = menu_key;
+        v.menu_auto_open = menu_auto_open;
+        v.menu_lang = menu_lang;
     }
 
-    bool update_watcher_time(const char* path)
+    void publish_locked(const values& v)
+    {
+        memcpy(playername, v.playername, sizeof(playername));
+        isfriendsonly = v.isfriendsonly;
+        memcpy(networkpassword, v.networkpassword, sizeof(networkpassword));
+        block_d3dcompiler46 = v.block_d3dcompiler46;
+        menu_key = v.menu_key;
+        menu_auto_open = v.menu_auto_open;
+        menu_lang = v.menu_lang;
+    }
+
+    // [LOCAL] Assumes g_config_mutex is held: its two callers (saveto and
+    // loadfrom) already own it, and std::mutex is deliberately NOT recursive.
+    bool update_watcher_time_locked(const char* path)
     {
         bool did_exist_before = exists;
         if (!fs_exists(path))
@@ -698,14 +833,37 @@ struct patch_config
         return (did_exist_before != exists) || !was_same_time;
     }
 
+    // [LOCAL] Locked wrapper for the MainThread's once-a-second poll, which
+    // calls this on its own rather than through saveto()/loadfrom().
+    bool update_watcher_time(const char* path)
+    {
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+        return update_watcher_time_locked(path);
+    }
+
     void saveto(const char* path)
     {
+        // [LOCAL] Locked for the whole call, including the file write.  That is
+        // what serialises the writers: in steady state only the render thread
+        // saves (a menu Save), while the MainThread's single save is
+        // load_settings_initial() at startup, which runs before CreateThread
+        // starts the MainThread at all.  Holding the lock across a sub-1 KB
+        // local write is cheap; what must never happen is holding it across an
+        // engine call, and saveto() makes none.
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+
+        // Copy the settings first: the file is then written from an immutable
+        // snapshot, so a concurrent edit cannot produce a file that mixes two
+        // different states (e.g. a new name with the old password).
+        values v;
+        capture_locked(v);
+
         std::ofstream outfile;
         outfile.open(path, std::ofstream::out | std::ofstream::binary);
 
         if (!outfile.is_open())
         {
-            update_watcher_time(path);
+            update_watcher_time_locked(path);
             return;
         }
 
@@ -717,56 +875,94 @@ struct patch_config
         outfile << std::endl;
 
         outfile << "# 留空则使用游戏自带的名称" << std::endl;
-        outfile << "playername=" << playername << std::endl;
+        outfile << "playername=" << v.playername << std::endl;
         outfile << std::endl;
 
         outfile << "# 仅好友可以邀请/加入你（默认开）1/0开启关闭" << std::endl;
-        outfile << "isfriendsonly=" << isfriendsonly << std::endl;
+        outfile << "isfriendsonly=" << v.isfriendsonly << std::endl;
         outfile << std::endl;
 
         outfile << "# 私人房间密码；留空则不设置" << std::endl;
-        outfile << "networkpassword=" << networkpassword << std::endl;
+        // [LOCAL] No NULL test any more: networkpassword is an inline array, so
+        // it is always a valid string.  The old "operator<< on a null const
+        // char*" (undefined behaviour) is gone with the heap pointer itself.
+        outfile << "networkpassword=" << v.networkpassword << std::endl;
         outfile << std::endl;
 
         outfile << "# 拦截旧版 d3dcompiler_46.dll，修复着色器卡顿，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
-        outfile << "block_d3dcompiler46=" << block_d3dcompiler46 << std::endl;
+        outfile << "block_d3dcompiler46=" << v.block_d3dcompiler46 << std::endl;
         outfile << std::endl;
 
         outfile << "# 呼出菜单的按键（虚拟键码，45=Insert）" << std::endl;
-        outfile << "menu_key=" << menu_key << std::endl;
+        outfile << "menu_key=" << v.menu_key << std::endl;
         outfile << std::endl;
 
         outfile << "# 进入主菜单后自动打开菜单 1/0开启关闭" << std::endl;
-        outfile << "menu_auto_open=" << menu_auto_open << std::endl;
+        outfile << "menu_auto_open=" << v.menu_auto_open << std::endl;
         outfile << std::endl;
 
         outfile << "# 菜单语言 1/0中文英文" << std::endl;
-        outfile << "menu_lang=" << menu_lang << std::endl;
+        outfile << "menu_lang=" << v.menu_lang << std::endl;
         outfile << std::endl;
 
-        outfile << "# 菜单呼出时机：1=默认（离开标题界面后可呼出，60 秒兜底）0=严格（只认离开标题界面）" << std::endl;
-        outfile << "menu_gate=" << menu_gate << std::endl;
-
         outfile.close();
-        update_watcher_time(path);
+        update_watcher_time_locked(path);
     }
 
     void loadfrom(const char* path)
     {
+        // [LOCAL] Opened and parsed with the lock NOT held.  The render thread
+        // reads config values on every frame, and a disk read here is the one
+        // operation that can take an unbounded amount of time (a cold file, an
+        // AV scanner sitting on it), so it must never happen underneath the
+        // lock the menu needs to draw.
         std::ifstream infile;
         infile.open(path, std::ifstream::in | std::ifstream::binary);
 
         if (!infile.is_open())
         {
-            update_watcher_time(path);
+            std::lock_guard<std::mutex> lock(g_config_mutex);
+            update_watcher_time_locked(path);
             return;
         }
 
-        std::string line;
-        while (!std::getline(infile, line).eof())
+        // A key the file does not mention keeps whatever is set right now, so
+        // the parse starts from the live values - copied out under the lock,
+        // then left alone until the finished copy is published.
+        values v;
         {
+            std::lock_guard<std::mutex> lock(g_config_mutex);
+            capture_locked(v);
+        }
+
+        std::string line;
+        // [LOCAL] Plain "while (getline(...))".  The old test was
+        // "while (!std::getline(infile, line).eof())", which silently dropped
+        // the LAST line of the file whenever it had no trailing newline:
+        // getline reads that line and sets eofbit in the same call, so the loop
+        // body never ran for it.  Appending "menu_auto_open=0" to the config by
+        // hand therefore did nothing at all, while the file itself claims
+        // settings apply within about a second.
+        while (std::getline(infile, line))
+        {
+            // [LOCAL] Tolerate CRLF.  getline only strips '\n', so a file saved
+            // by Notepad left a trailing '\r' glued to every value:
+            // "playername=Bob" became "Bob\r", and - far worse -
+            // networkpassword was hashed WITH the '\r', so the room password no
+            // longer matched what the other player types and joining failed
+            // with "the password is the same but it will not let me in".  The
+            // patch's own writer emits LF, so this only ever bit hand edits.
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+
             auto sep = line.find("=");
-            if (sep == std::string::npos || sep >= (line.length() - 1)) // must have a value
+            // [LOCAL] A line with no '=' is a comment or blank - skip it.  The
+            // old extra test "sep >= (line.length() - 1)" also rejected a
+            // PRESENT but EMPTY value ("playername="), so clearing a setting by
+            // emptying it never took effect.  Unknown keys still fall through
+            // the switch below, so a prose line that happens to contain '=' is
+            // harmless.
+            if (sep == std::string::npos)
             {
                 continue;
             }
@@ -782,83 +978,73 @@ struct patch_config
                 {
                     val = val.substr(0, 15);
                 }
-                __playername();
-                strcpy_s(playername, sizeof(playername), val.data());
+                memset(v.playername, 0, sizeof(v.playername));
+                strcpy_s(v.playername, sizeof(v.playername), val.data());
             }
             break;
             case FNV32("isfriendsonly"):
             {
                 std::istringstream ivalread(val);
-                ivalread >> isfriendsonly;
+                ivalread >> v.isfriendsonly;
                 if (ivalread.fail())
                 {
-                    isfriendsonly = false; // its better to have it fail then to have people who cant disable this setting because of whatever reason
+                    v.isfriendsonly = false; // its better to have it fail then to have people who cant disable this setting because of whatever reason
                 }
             }
             break;
             case FNV32("networkpassword"):
             {
-                if (networkpassword)
-                {
-                    free(networkpassword);
-                    networkpassword = NULL;
-                }
-                if (val.length() > 1023)
-                {
-                    val = val.substr(0, 1023); // seriously?!
-                }
-                auto bufsize = val.length() + 1;
-                networkpassword = (char*)malloc(bufsize);
-                strcpy_s(networkpassword, bufsize, val.data());
+                // [LOCAL] No malloc/free pair any more.  The old code freed the
+                // shared pointer, set it to NULL and only then allocated the
+                // replacement - a window in which another thread could read
+                // NULL (and SetNetworkPassword's first act was strlen).  A
+                // fixed inline buffer has no such window and needs no clamp:
+                // _TRUNCATE stops at 1023 characters, which is the same limit
+                // the old "val.substr(0, 1023)" applied.
+                strncpy_s(v.networkpassword, sizeof(v.networkpassword), val.data(), _TRUNCATE);
             }
             break;
             case FNV32("block_d3dcompiler46"):
             {
                 std::istringstream ivalread(val);
-                ivalread >> block_d3dcompiler46;
+                ivalread >> v.block_d3dcompiler46;
                 if (ivalread.fail())
                 {
-                    block_d3dcompiler46 = true; // default: enabled
+                    v.block_d3dcompiler46 = true; // default: enabled
                 }
             }
             break;
             case FNV32("menu_key"):
             {
                 std::istringstream ivalread(val);
-                ivalread >> menu_key;
-                if (ivalread.fail())
+                ivalread >> v.menu_key;
+                // [LOCAL] Same range check t7patch_cfg_set_menu_key() applies.
+                // A value outside 1..255 can never come from a physical key, so
+                // the hotkey would simply look broken with no obvious way back
+                // other than editing the file again.
+                if (ivalread.fail() || v.menu_key < 1 || v.menu_key > 255)
                 {
-                    menu_key = 45; // VK_INSERT
+                    v.menu_key = 45; // VK_INSERT
                 }
             }
             break;
             case FNV32("menu_auto_open"):
             {
                 std::istringstream ivalread(val);
-                ivalread >> menu_auto_open;
+                ivalread >> v.menu_auto_open;
                 if (ivalread.fail())
                 {
-                    menu_auto_open = 1; // default: auto-open (user default)
+                    v.menu_auto_open = 1; // default: auto-open (user default)
                 }
             }
             break;
             case FNV32("menu_lang"):
             {
                 std::istringstream ivalread(val);
-                ivalread >> menu_lang;
+                ivalread >> v.menu_lang;
                 if (ivalread.fail())
                 {
-                    menu_lang = 1; // default: Chinese
-                }
-            }
-            break;
-            case FNV32("menu_gate"):
-            {
-                std::istringstream ivalread(val);
-                ivalread >> menu_gate;
-                if (ivalread.fail())
-                {
-                    menu_gate = 1; // default: online sign-in + offline fallback
+                    v.menu_lang = 1; // default: Chinese
                 }
             }
             break;
@@ -866,13 +1052,40 @@ struct patch_config
         }
 
         infile.close();
-        update_watcher_time(path);
+
+        // [LOCAL] Publish the whole parsed file in one step.  Publishing field
+        // by field (the old behaviour, because loadfrom wrote straight into the
+        // shared object) let a reader see a config that never existed on disk -
+        // new playername next to the previous password.
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+        publish_locked(v);
+        update_watcher_time_locked(path);
     }
 };
 
 patch_config user_config;
 
 void apply_settings(); // [LOCAL] forward declaration: defined below this block
+
+// [LOCAL] "An in-process Save still owes the engine a push."  Set by
+// t7patch_config_save() on the render thread (the menu's Save buttons) and
+// consumed by MainThread, which is where apply_settings() is allowed to run.
+//
+// Why the file watcher cannot do this job: saveto() records the timestamp of
+// the file it just wrote, so the next poll compares equal and reports
+// "unchanged" - correctly, because the only thing a file watcher knows is the
+// file.  So a menu Save wrote the file and the in-memory config and then
+// stopped there: playername / networkpassword / isfriendsonly reached the
+// engine only on the next game start.  Measured 2026-09-15 11:37:35 - the log
+// carries "config written to disk" and no "playername applied to the
+// front-end strings" after it, while the conf on disk did hold
+// playername=muyou233; that is the "I have to restart to rename myself" the
+// user reported.
+//
+// The flag carries no data on purpose: the setters have already updated
+// user_config, MainThread only owes the engine call.  External edits still come
+// in through the watcher, so both sources are covered.
+std::atomic<bool> g_config_apply_pending{ false };
 
 // [LOCAL] Config helpers exposed to dllmain.cpp / Hooks.cpp.  The 46 block is
 // installed long before apply_settings() runs, so it needs its own read-only
@@ -887,53 +1100,57 @@ void t7patch_load_config_early()
 
 bool t7patch_block_d3dcompiler46_enabled()
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     return user_config.block_d3dcompiler46 != 0;
 }
 
 int t7patch_menu_key()
 {
+    // [LOCAL] Read from the WndProc thread on every key message, and from the
+    // render thread while it draws the hotkey row - hence the lock.
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     return user_config.menu_key;
-}
-
-// [LOCAL] Overlay gate mode: 1 = default (online sign-in, plus a front-end
-// uptime fallback so the offline main menu can open the menu too), 0 = strict.
-int t7patch_menu_gate()
-{
-    return user_config.menu_gate;
 }
 
 // [LOCAL] Overlay menu language (1 = Chinese, 0 = English).
 int t7patch_cfg_menu_lang()
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     return user_config.menu_lang;
 }
 
 void t7patch_cfg_set_menu_lang(int value)
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.menu_lang = value ? 1 : 0;
 }
 
 // [LOCAL] Change the overlay hotkey (virtual-key code) from the menu.
 void t7patch_cfg_set_menu_key(int vk)
 {
-    if (vk > 0 && vk < 256)
-        user_config.menu_key = vk;
+    if (vk <= 0 || vk >= 256)
+        return;
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.menu_key = vk;
 }
 
 bool t7patch_menu_auto_open()
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     return user_config.menu_auto_open != 0;
 }
 
 // [LOCAL] Toggle auto-open from the overlay menu.
 void t7patch_cfg_set_menu_auto_open(bool v)
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.menu_auto_open = v ? 1 : 0;
 }
 
 // [LOCAL] Called by the overlay menu: flips the 46 switch in memory.
 void t7patch_config_set_block46(bool enable)
 {
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.block_d3dcompiler46 = enable ? 1 : 0;
 }
 
@@ -941,24 +1158,55 @@ void t7patch_config_set_block46(bool enable)
 // menu edits (playername, friends-only, ...) take effect immediately.
 void t7patch_config_save()
 {
-    // [LOCAL] Persist only - deliberately NO apply_settings() here.  This is
-    // called from the overlay menu, i.e. from the render thread, and
-    // apply_settings touches engine state (window text, Steam, dvars) that is
-    // only safe from the update thread.  The config watcher notices the file
-    // change within ~1 s and applies it there, which is also exactly what the
-    // config template promises ("edits apply within ~1 second").
+    // [LOCAL] Persist here, apply on MainThread.  Still no apply_settings() on
+    // this thread: this runs from the overlay menu, i.e. from the render
+    // thread, and apply_settings touches engine state (window text, Steam,
+    // dvars) that is only safe from the update thread.
+    //
+    // The hand-off is the explicit flag below, NOT the file watcher - the
+    // watcher cannot fire for a menu Save (saveto() stamps the timestamp it
+    // just wrote, so the next poll legitimately reports "unchanged").  That
+    // missing hand-off is why a menu rename needed a restart until now; see the
+    // note on g_config_apply_pending.  MainThread picks the flag up on its next
+    // 1 s tick, which is the "applies within ~1 s" the config template
+    // promises.
     user_config.saveto(PATCH_CONFIG_LOCATION);
+    g_config_apply_pending = true;
+
+    // [LOCAL] One line per write, so "I pressed Save and nothing happened" can
+    // be settled from the log: this line means the file was written, and its
+    // absence means the click never reached the handler.  Saves are
+    // click-driven, so this cannot flood the log.
+    overlay::DebugLog("config written to disk");
 }
 
 // [LOCAL] Field-level accessors for the overlay menu (patch_config lives in
 // this file, so the menu talks to it through these narrow helpers).
-const char* t7patch_cfg_playername() { return user_config.playername; }
+//
+// The two string getters COPY into the caller's buffer instead of handing back
+// a pointer into the shared object.  Returning `const char*` and letting the
+// caller copy afterwards would have left the last hole open: the lock would be
+// released before the copy, so the caller could still read a buffer that
+// loadfrom() was rewriting underneath it.
+void t7patch_cfg_playername(char* dst, size_t dstSize)
+{
+    if (!dst || dstSize == 0)
+        return;
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    strncpy_s(dst, dstSize, user_config.playername, _TRUNCATE);
+}
 
 // [LOCAL] The game's own current player name.  While no custom name is set the
 // engine keeps it in pNameBuffer (SetPlayerName only overwrites that buffer
 // for a real custom name), so reading it shows the user what the game is
 // actually using.  Copied into a static because the caller only keeps the
 // pointer for the duration of the menu refresh.
+//
+// This is game state, not config state, so g_config_mutex does not apply.  It
+// needs no lock of its own either: only the render thread calls it, and the one
+// writer of pNameBuffer inside this DLL - SetPlayerName() on the MainThread -
+// writes it only for a NON-empty custom name, which is exactly the case where
+// the caller does not consult this fallback.
 const char* t7patch_game_playername()
 {
     static char nameBuf[24] = {};
@@ -969,32 +1217,78 @@ const char* t7patch_game_playername()
         return nameBuf;
     }
     return "";
-}void t7patch_cfg_set_playername(const char* v)
+}
+
+void t7patch_cfg_set_playername(const char* v)
 {
+    if (!v)
+        return; // strncpy_s with a null source trips the invalid-parameter handler
+    std::lock_guard<std::mutex> lock(g_config_mutex);
     strncpy_s(user_config.playername, sizeof(user_config.playername), v, _TRUNCATE);
 }
-bool t7patch_cfg_friends_only() { return user_config.isfriendsonly != 0; }
-void t7patch_cfg_set_friends_only(bool v) { user_config.isfriendsonly = v ? 1 : 0; }
-const char* t7patch_cfg_network_password() { return user_config.networkpassword; }
+
+bool t7patch_cfg_friends_only()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.isfriendsonly != 0;
+}
+
+void t7patch_cfg_set_friends_only(bool v)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.isfriendsonly = v ? 1 : 0;
+}
+
+void t7patch_cfg_network_password(char* dst, size_t dstSize)
+{
+    if (!dst || dstSize == 0)
+        return;
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    strncpy_s(dst, dstSize, user_config.networkpassword, _TRUNCATE);
+}
+
 void t7patch_cfg_set_network_password(const char* v)
 {
-    if (user_config.networkpassword)
-    {
-        free(user_config.networkpassword);
-        user_config.networkpassword = NULL;
-    }
-    size_t len = strlen(v);
-    if (len > 1023)
-        len = 1023;
-    user_config.networkpassword = (char*)malloc(len + 1);
-    strcpy_s(user_config.networkpassword, len + 1, v);
+    if (!v)
+        v = "";
+
+    // [LOCAL] A plain copy into the fixed buffer.  The old version malloc'ed a
+    // replacement, swapped the pointer and freed the previous buffer, with a
+    // hand-rolled memcpy to dodge strcpy_s's ERANGE on over-long input - all of
+    // which existed only because the value was heap-allocated.  _TRUNCATE now
+    // enforces the same 1023-character limit with none of that machinery.
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    strncpy_s(user_config.networkpassword, sizeof(user_config.networkpassword), v, _TRUNCATE);
 }
 
 void apply_settings()
 {
-    SetPlayerName(user_config.playername);
-    SetFriendsOnly(user_config.isfriendsonly);
-    SetNetworkPassword(user_config.networkpassword);
+    // [LOCAL] Copy the settings out under the lock, then call the engine with
+    // the copies.  Holding g_config_mutex across SetPlayerName / SetFriendsOnly
+    // / SetNetworkPassword would be the one genuinely dangerous thing this lock
+    // could do: those are engine and Steam entry points that run arbitrary code
+    // - including callbacks that read the config back - and the mutex is not
+    // recursive.
+    char playername[16];
+    char networkpassword[1024];
+    bool isfriendsonly;
+    {
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+        memcpy(playername, user_config.playername, sizeof(playername));
+        memcpy(networkpassword, user_config.networkpassword, sizeof(networkpassword));
+        isfriendsonly = user_config.isfriendsonly != 0;
+    }
+
+    SetPlayerName(playername);
+    SetFriendsOnly(isfriendsonly);
+    SetNetworkPassword(networkpassword);
+
+    // [LOCAL] One line per push, so the log answers "did my Save reach the
+    // engine?" without guessing.  For a menu Save it follows "config written to
+    // disk"; for a hand-edited conf it appears on its own.  Both lines used to
+    // be missing in the same way, and telling them apart is exactly what the
+    // 2026-09-15 rename investigation needed.
+    overlay::DebugLog("settings applied to the engine");
 }
 
 DWORD WINAPI MainThread(LPVOID lpParam)
@@ -1023,15 +1317,30 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     // hooks::UiMainMenuSeen(), and the user's title-screen dismissal stays a
     // precondition (so a pre-resolved label cannot arm early).
     //
-    // One net remains, in case the labels never show up (an unlisted localisation
-    // or a different front-end flow): the front-end-uptime fallback after
-    // kGateFallbackMs; menu_gate=0 disables it, menu_gate=1 (default) keeps it as
-    // the never-locked-out guarantee.
-    constexpr ULONGLONG kGateFallbackMs = 60000;
+    // There is deliberately NO timer fallback any more (removed 2026-09-15, on
+    // the user's call: "不要兜底吧，只保留在主菜单自动弹出").  The gate is that
+    // one screen signal plus the dismissal precondition - nothing else can open
+    // the menu.
+    //
+    // Why the timer had to go: measured on 2026-09-15 (log session 10:45:08) the
+    // gate opened at 10:46:26.603, exactly 60 s after "front-end UI level = 1"
+    // (10:45:26.555), with neither a "title screen dismissed" nor a
+    // "main-menu label rendered" line in between.  The uptime fallback had fired
+    // while the user was simply idling on the "按ENTER开始" screen - the very
+    // screen this gate exists to keep out - and popped the overlay over it a
+    // minute after the front-end came up.  Re-basing the timer on the dismissal
+    // (the first fix attempt) would have removed that specific symptom, but any
+    // timer still means "the menu can open by itself somewhere I did not ask
+    // for", so it is gone for good rather than tuned.
+    //
+    // The trade-off, stated plainly: if hooks::UiMainMenuSeen() never goes true
+    // (an unlisted localisation, or a front-end flow that resolves none of the
+    // marker labels), the overlay cannot be opened at all.  That is visible in
+    // the log as "gate opened" never appearing - if it ever happens, the marker
+    // list in Hooks.cpp IsMainMenuLabel() is what to extend.
 
     int lastUiLevel = -1;
     bool lastSignedIn = false;
-    ULONGLONG uiLevelOnset = 0;
 
     // [LOCAL] NOTE: do NOT call Live_SystemInfo() with arbitrary infoTypes to
     // probe the connection state.  Tried on 2026-09-14 and it hard-crashes the
@@ -1044,19 +1353,28 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     for (;;)
     {
         arxan_bypass::maintain();
-        if (user_config.update_watcher_time(PATCH_CONFIG_LOCATION))
-        {
+
+        // [LOCAL] Two ways a config reaches us, and at most one apply per tick:
+        //   * the file changed under us - a hand-edited t7patch.conf, or another
+        //     process writing it: reload it, then push to the engine;
+        //   * an in-process Save owes the engine a push (menu Save buttons) -
+        //     user_config already holds the new values, only the engine call is
+        //     missing.  The watcher structurally cannot see this one; see the
+        //     note on g_config_apply_pending.
+        // The flag is exchanged unconditionally rather than ||-ed away, so a
+        // tick that legitimately sees both sources still clears it.
+        const bool fileChanged = user_config.update_watcher_time(PATCH_CONFIG_LOCATION);
+        if (fileChanged)
             user_config.loadfrom(PATCH_CONFIG_LOCATION);
+        const bool menuSavePending = g_config_apply_pending.exchange(false);
+        if (fileChanged || menuSavePending)
             apply_settings();
-        }
 
         {
             const int uiLevel = (int)*(volatile char*)OFF_s_runningUILevel;
             if (uiLevel != lastUiLevel)
             {
                 lastUiLevel = uiLevel;
-                if (uiLevel != 0 && uiLevelOnset == 0)
-                    uiLevelOnset = GetTickCount64();
                 char msg[64]{};
                 snprintf(msg, sizeof(msg), "gate: front-end UI level = %d", uiLevel);
                 overlay::DebugLog(msg);
@@ -1065,6 +1383,10 @@ DWORD WINAPI MainThread(LPVOID lpParam)
             // Only safe to call game functions once the game UI is running.
             if (lastUiLevel != 0)
             {
+                // [LOCAL] Diagnostic only since 2026-09-15: the gate no longer
+                // consults the sign-in state (the screen signal replaced it), but
+                // the log line is what tells us whether the front-end reached the
+                // online lobby at all when something goes wrong.
                 const bool signedIn = Live_IsUserSignedInToDemonware(CONTROLLER_INDEX_0);
                 if (signedIn != lastSignedIn)
                 {
@@ -1083,9 +1405,8 @@ DWORD WINAPI MainThread(LPVOID lpParam)
                 // Works online and offline (pure UI text).
                 // The title-screen dismissal stays a precondition, so a label the
                 // game happens to pre-resolve earlier cannot arm the hotkey.
-                // The front-end-uptime fallback remains the last-resort net so
-                // the overlay can never end up permanently locked (menu_gate=0
-                // turns it off).  NotifyMainMenuReached() is idempotent.
+                // This is the ONLY thing that opens the gate - no timer, see the
+                // note before the loop.  NotifyMainMenuReached() is idempotent.
                 const unsigned long long dismissed = overlay::TitleScreenDismissedMs();
                 // [LOCAL] The verbose UI diagnostics (every distinct UI-model path
                 // and UI string) were what found this signal and are off by
@@ -1093,10 +1414,11 @@ DWORD WINAPI MainThread(LPVOID lpParam)
                 // again for debugging, and the screen detection itself does not
                 // depend on it.
                 const bool mainMenuUp = dismissed != 0 && hooks::UiMainMenuSeen();
-                const bool fallbackPassed = uiLevelOnset != 0
-                    && (GetTickCount64() - uiLevelOnset) >= kGateFallbackMs;
-                if (mainMenuUp || (t7patch_menu_gate() != 0 && fallbackPassed))
-                    overlay::NotifyMainMenuReached();
+                // The log line names the signal, so "which branch opened it" is
+                // never a guess again (the 2026-09-15 popup took a log dig to
+                // attribute because both branches printed the same text).
+                if (mainMenuUp)
+                    overlay::NotifyMainMenuReached("main-menu label rendered");
 
                 // [LOCAL] The DW_LOBBY / PTR_LobbyVM / s_playerData_ptr value
                 // probes and the 24-byte uistate neighbourhood dump that lived
@@ -1253,7 +1575,8 @@ void Protection::install()
     SS(migratebits)
     SS(lasthosttimems)
     SS(nomineelist)
-    SS(dlcBits)
+    // [LOCAL] SS(x) expands to "s##x = #x;", so the two duplicate lines that
+    // used to sit here just re-assigned sdlcBits twice.  Harmless, but noise.
     SS(dlcBits)
     SS(serverstatus)
     SS(launchnonce)
@@ -2209,19 +2532,40 @@ namespace Iat_hook_
             module = GetModuleHandle(0);
 
         PIMAGE_DOS_HEADER img_dos_headers = (PIMAGE_DOS_HEADER)module;
+        // [LOCAL] Bail out on a bad DOS header.  The old code printed a bare
+        // newline as its entire "diagnostic" and then walked the header anyway,
+        // using garbage offsets.
+        if (img_dos_headers->e_magic != IMAGE_DOS_SIGNATURE)
+            return 0;
+
         PIMAGE_NT_HEADERS img_nt_headers = (PIMAGE_NT_HEADERS)((BYTE*)img_dos_headers + img_dos_headers->e_lfanew);
         PIMAGE_IMPORT_DESCRIPTOR img_import_desc = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)img_dos_headers + img_nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-        if (img_dos_headers->e_magic != IMAGE_DOS_SIGNATURE)
-            printf("\n");
 
-        for (IMAGE_IMPORT_DESCRIPTOR* iid = img_import_desc; iid->Name != 0; iid++) {
-            for (int func_idx = 0; *(func_idx + (void**)(iid->FirstThunk + (size_t)module)) != nullptr; func_idx++) {
-                char* mod_func_name = (char*)(*(func_idx + (size_t*)(iid->OriginalFirstThunk + (size_t)module)) + (size_t)module + 2);
-                const intptr_t nmod_func_name = (intptr_t)mod_func_name;
-                if (nmod_func_name >= 0) {
-                    if (!::strcmp(function, mod_func_name))
-                        return func_idx + (void**)(iid->FirstThunk + (size_t)module);
-                }
+        // PIMAGE_IMPORT_DESCRIPTOR rather than IMAGE_IMPORT_DESCRIPTOR*: the
+        // former carries the __unaligned qualifier winnt.h puts on it, so the
+        // initialisation no longer trips C4090 (the old spelling did).
+        for (PIMAGE_IMPORT_DESCRIPTOR iid = img_import_desc; iid->Name != 0; iid++) {
+            // [LOCAL] OriginalFirstThunk == 0 marks a BOUND import: there is no
+            // name table at all, and the old code still read "module + 2" as if
+            // there were one.
+            if (iid->OriginalFirstThunk == 0)
+                continue;
+
+            auto* firstThunk = (IMAGE_THUNK_DATA*)((BYTE*)module + iid->FirstThunk);
+            auto* nameThunk = (IMAGE_THUNK_DATA*)((BYTE*)module + iid->OriginalFirstThunk);
+
+            for (int func_idx = 0; firstThunk[func_idx].u1.Function != 0; func_idx++) {
+                // [LOCAL] A name-table entry is either an ordinal (high bit set,
+                // no name) or an RVA to an IMAGE_IMPORT_BY_NAME.  The old code
+                // dereferenced both as names; the "nmod_func_name >= 0" check
+                // meant to filter them out is always true for a user-mode
+                // pointer.
+                if (nameThunk[func_idx].u1.Ordinal & IMAGE_ORDINAL_FLAG64)
+                    continue;
+
+                auto* importByName = (IMAGE_IMPORT_BY_NAME*)((BYTE*)module + nameThunk[func_idx].u1.AddressOfData);
+                if (!::strcmp(function, (const char*)importByName->Name))
+                    return (void**)&firstThunk[func_idx].u1.Function;
             }
         }
 
@@ -2231,7 +2575,13 @@ namespace Iat_hook_
 
     uintptr_t detour_iat_ptr(const char* function, void* newfunction, HMODULE module)
     {
-        auto&& func_ptr = find(function, module);
+        void** func_ptr = find(function, module);
+        // [LOCAL] find() returns 0 when the module does not import that symbol
+        // at all.  Dereferencing it here was an immediate access violation
+        // inside install() / uninstall().
+        if (!func_ptr)
+            return 0;
+
         if (*func_ptr == newfunction || *func_ptr == nullptr)
             return 0;
 

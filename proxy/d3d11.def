@@ -22,6 +22,13 @@
 ;  mkthunk list in proxy/thunks.asm.
 ; =====================================================================
 
+; [LOCAL] Kept as "d3d11" on purpose.  The linker's intermediate output is
+; T7Patch.dll, so it prints LNK4070 - but what SHIPS and gets loaded is
+; d3d11.dll (see the PostBuild copy), and this statement feeds the PE's
+; informational "DLL name" field.  Keeping that field equal to the file that
+; is actually loaded is the safer default against anything that inspects module
+; metadata (BO3 ships Arxan), so the warning is accepted as known noise rather
+; than silenced by renaming the export module.
 LIBRARY d3d11
 
 EXPORTS

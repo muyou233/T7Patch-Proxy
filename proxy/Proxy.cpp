@@ -13,8 +13,9 @@
 //
 //  It works because BlackOps3.exe carries a *static* import of d3d11.dll
 //  (verified against the retail binary: the only function it imports from
-//  d3d11.dll is D3D11CreateDevice).  Changing %SystemRoot%\System32\
-//  d3d11.dll is never touched - we load the real one by absolute path.
+//  d3d11.dll is D3D11CreateDevice).  The system copy at
+//  %SystemRoot%\System32\d3d11.dll is never touched - we load the real one
+//  by absolute path.
 //
 //  WHAT IT DOES NOT DO
 //  -------------------

@@ -527,7 +527,26 @@ namespace hooks {
 
 		bool hkUI_DoModelStringReplacement(__int32 controllerIndex, char* element, const char* source, char* dest, unsigned int destSize)
 		{
+			// [LOCAL] The two guards its twin, hkSEH_ReplaceDirectiveInString-
+			// WithBinding, has had all along: a null source, and a source that
+			// cannot fit the fixed 4096-byte local.  Without them strcpy_s (the
+			// MSVC array overload, which knows the destination size) invokes the
+			// invalid-parameter handler, i.e. _invoke_watson / terminate in a
+			// release build.  A UI string that long can only come from a corrupt
+			// or oversized localisation entry - which is exactly the input this
+			// hook exists to defend against.
 			char input[4096]{};
+
+			if (!source)
+			{
+				source = "";
+			}
+
+			if (strlen(source) > 4095)
+			{
+				return false; // refuse rather than truncate: same policy as the twin
+			}
+
 			strcpy_s(input, source);
 			input[4095] = 0;
 			LogUiString("model", source); // [LOCAL] screen-content probe
@@ -763,10 +782,38 @@ namespace hooks {
 
 		bool hkLobbyMsgRW_PrepReadMsg(__int64 lm)
 		{
-			if (LobbyMsgRW_PrepReadMsg(lm) && (!ZBR_PREFIX_BYTE || ((((unsigned char(__fastcall*)(__int64))PTR_MSG_ReadByte)(lm) == ZBR_PREFIX_BYTE) && (((unsigned char(__fastcall*)(__int64))PTR_MSG_ReadByte)(lm) == ZBR_PREFIX_BYTE2)) ))
+			// [LOCAL] Consumes the optional two-byte ZBR prefix that
+			// hkLobbyMsgRW_PrepWriteMsg prepends when a private-room password is
+			// configured, so the payload that follows starts where the reader
+			// expects it.
+			//
+			// Every path returns true on purpose - rejecting here is NOT safe.
+			// The lobby stream also carries traffic from clients that never
+			// wrote a prefix (anyone not running the patch), and dropping those
+			// desynchronises the lobby.  So a prefix mismatch means "not from a
+			// patched peer", not "malformed": the message is still passed on.
+			// The original function's result is ignored for that same reason.
+			//
+			// The previous form, "if (A && (...)) return true; return true;",
+			// behaved identically but read as though the check mattered, with
+			// the ReadByte side effects buried in a condition whose value was
+			// thrown away.
+			const bool primed = LobbyMsgRW_PrepReadMsg(lm);
+			if (primed && ZBR_PREFIX_BYTE)
 			{
-				// ALOG("valid pkt %d", *(__int32*)(lm + 0x38));
-				return true;
+				// [LOCAL] The second read is CONDITIONAL, not a second skip.
+				// The original expression was "readByte() == BYTE && readByte()
+				// == BYTE2", and && short-circuits: when the first byte does not
+				// match, the second read never happens.  Each read advances the
+				// message cursor, so that one-byte difference is visible to
+				// whatever parses the payload after this call.  Keep the exact
+				// shape - only the side effects matter, the values are unused.
+				const unsigned char firstByte =
+					((unsigned char(__fastcall*)(__int64))PTR_MSG_ReadByte)(lm);
+				if (firstByte == ZBR_PREFIX_BYTE)
+				{
+					(void)(((unsigned char(__fastcall*)(__int64))PTR_MSG_ReadByte)(lm));
+				}
 			}
 
 			return true;

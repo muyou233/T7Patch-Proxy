@@ -10,9 +10,12 @@ namespace t7log
     {
         // Fills `dirOut` with "<game folder>\T7Patch" and `fileOut` with the log
         // path inside it.  The path is built from the main module location, not
-        // the working directory: an intercepted LoadLibrary call can run on a
-        // thread whose working directory is not the game folder, which would
-        // silently lose the log (the same trap the block log hit before).
+        // the working directory: the process working directory is NOT guaranteed
+        // to be the game folder - Steam normally sets it, but a launcher or a
+        // debugger can leave it elsewhere - and a relative path would then
+        // silently write the log into the wrong place (the trap the block log
+        // hit before).  Note the CWD is per-process, not per-thread; the earlier
+        // wording here blamed the thread.
         bool BuildPaths(char* dirOut, size_t dirSize, char* fileOut, size_t fileSize)
         {
             char exe[MAX_PATH] = {};
