@@ -11,16 +11,24 @@
 // What the download can and cannot do: the payload becomes UI text and nothing
 // else.  It is never executed, never parsed as anything but "key=value" lines,
 // and a file that fails validation is discarded without touching the dictionary
-// currently in force.  That is also why the URL is hard-coded - a user-editable
-// download URL would hand "what the UI says" to whoever set it.
+// currently in force.  That is also why the source URLs are hard-coded - a
+// user-editable download URL would hand "what the UI says" to whoever set it.
+// Three mirrors are tried in order: the jsDelivr CDN in front of the GitHub
+// repo (best plain reachability from mainland China; its edge cache trails a
+// fresh push by hours, purge on demand), then GitHub raw itself (always
+// current), then Gitee (whose raw endpoint refuses anonymous downloads with
+// HTTP 451, so the last fallback goes through Gitee's public contents API
+// instead - same bytes, wrapped in JSON with a base64 payload, unwrapped
+// after the download).  All anonymous; all the user's own published content.
 namespace dict_update
 {
     enum class State
     {
-        Idle,    // nothing attempted yet this session
-        Running, // a download is in flight
-        Ok,      // last attempt succeeded (Status::entries says how many arrived)
-        Failed   // last attempt failed (Status::message says why)
+        Idle,     // nothing attempted yet this session
+        Running,  // a download is in flight
+        Ok,       // last attempt succeeded (Status::entries says how many arrived)
+        Failed,   // last attempt failed (Status::message says why)
+        UpToDate  // click landed inside the post-success cooldown; nothing ran
     };
 
     struct Status

@@ -26,11 +26,41 @@ namespace dict_update
 {
     namespace
     {
-        // Hard-coded on purpose - see the header.  Points at the published copy
-        // in the repo, which is the same file the sync tool deploys by hand.
-        constexpr const wchar_t* kUrl =
-            L"https://raw.githubusercontent.com/muyou233/T7Patch-src"
-            L"/main/translate/translate_zh.txt";
+        // Hard-coded on purpose - see the header.  Three mirrors of the same
+        // published file, tried in order: the jsDelivr CDN first (best plain
+        // reachability from mainland China), GitHub raw second (always
+        // current), Gitee last.  All three are anonymous and equally trusted
+        // (jsDelivr serves the repo read-only).  Gitee's raw endpoint answers
+        // HTTP 451 to anonymous downloaders, but its contents API serves the
+        // same bytes as JSON with a base64 payload - so that mirror carries a
+        // jsonApi flag and gets unwrapped after the download.  jsDelivr's
+        // edge cache trails a fresh push by hours (a branch URL is cached,
+        // not purged automatically) - acceptable for a file that changes
+        // rarely, and the owner can purge it on demand.
+        struct Source
+        {
+            const wchar_t* url;
+            bool jsonApi;
+        };
+        constexpr Source kSources[] =
+        {
+            {
+                L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-src@main"
+                L"/translate/translate_zh.txt",
+                false
+            },
+            {
+                L"https://raw.githubusercontent.com/muyou233/T7Patch-src"
+                L"/main/translate/translate_zh.txt",
+                false
+            },
+            {
+                L"https://gitee.com/api/v5/repos/muyou23333/"
+                L"t7-patch-proxy-translate/contents/translate/translate_zh.txt"
+                L"?ref=master",
+                true
+            },
+        };
 
         // Sanity limits.  The real file is ~45 KB; anything past the cap is an
         // error page or a stuck socket, not a dictionary.
@@ -40,8 +70,16 @@ namespace dict_update
         // a truncated file or an error page must never replace a working one.
         constexpr double kMinKeepRatio = 0.8;
 
+        // Cooldown between two SUCCESSFUL runs.  Counted from the moment a
+        // download passed every check and replaced the file - a failed or
+        // refused run must never start the cooldown, or a user on a slow
+        // connection would be locked out of retrying.  Rapid re-clicking
+        // after a good update just hammers the source for an identical file.
+        constexpr unsigned kCooldownMs = 60u * 1000u;
+
         std::atomic<int> g_state{ static_cast<int>(State::Idle) };
         std::atomic<unsigned> g_entries{ 0 };
+        std::atomic<unsigned long long> g_lastRunMs{ 0 };
         std::mutex g_messageMutex;
         char g_message[192] = {};
 
@@ -80,7 +118,7 @@ namespace dict_update
         // One bounded HTTPS GET.  Every wait has a timeout, so a black-holed
         // connection cannot leave the worker (and the "downloading" state)
         // stuck forever.
-        bool HttpGet(std::string& body, std::string& err)
+        bool HttpGet(const wchar_t* url, std::string& body, std::string& err)
         {
             body.clear();
             err.clear();
@@ -93,7 +131,7 @@ namespace dict_update
             parts.dwHostNameLength = _countof(host);
             parts.lpszUrlPath = path;
             parts.dwUrlPathLength = _countof(path);
-            if (!WinHttpCrackUrl(kUrl, 0, 0, &parts))
+            if (!WinHttpCrackUrl(url, 0, 0, &parts))
             {
                 err = "cannot parse the download URL";
                 return false;
@@ -111,7 +149,14 @@ namespace dict_update
                 err = "network error";
                 return false;
             }
-            WinHttpSetTimeouts(session, 10000, 10000, 15000, 20000);
+            // Response phases get 3 s each (user's spec: "switch if no
+            // response in 3 s"): resolve, connect and send abandon a dead
+            // mirror after exactly 3 s and the next one is tried.  Receive
+            // is 0 = wait indefinitely (documented semantics), because a
+            // slow-but-alive mirror must be allowed to stream the file at
+            // its own pace - only the time to START answering is limited,
+            // not the transfer itself.
+            WinHttpSetTimeouts(session, 3000, 3000, 3000, 0);
 
             bool ok = false;
             HINTERNET connect = WinHttpConnect(session, host, parts.nPort, 0);
@@ -222,30 +267,140 @@ namespace dict_update
             return count;
         }
 
+        // Standard base64; tolerates the line breaks Gitee embeds in the
+        // payload, stops at the first '=' padding.  Returns false only when
+        // nothing decodable came out.
+        bool DecodeBase64(const std::string& in, std::string& out)
+        {
+            auto digit = [](char c) -> int
+            {
+                if (c >= 'A' && c <= 'Z') return c - 'A';
+                if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+                if (c >= '0' && c <= '9') return c - '0' + 52;
+                if (c == '+') return 62;
+                if (c == '/') return 63;
+                return -1;
+            };
+
+            out.clear();
+            out.reserve(in.size() / 4 * 3);
+            unsigned acc = 0;
+            int bits = 0;
+            for (char c : in)
+            {
+                if (c == '=')
+                    break; // padding: whatever is accumulated is whole bytes
+                const int v = digit(c);
+                if (v < 0)
+                    continue; // whitespace / line breaks inside the payload
+                acc = (acc << 6) | static_cast<unsigned>(v);
+                bits += 6;
+                if (bits >= 8)
+                {
+                    bits -= 8;
+                    out.push_back(static_cast<char>((acc >> bits) & 0xFF));
+                }
+            }
+            return !out.empty();
+        }
+
+        // Gitee's contents API answers JSON: {"content":"<base64>",...}.
+        // The base64 alphabet contains no quotes or backslashes, so the
+        // payload is exactly the bytes between the opening quote and the
+        // next one.  Anything unexpected is a plain source error.
+        bool UnwrapGiteeJson(const std::string& body, std::string& out,
+            std::string& err)
+        {
+            static const char kKey[] = "\"content\":\"";
+            const size_t at = body.find(kKey);
+            const size_t b64start =
+                (at == std::string::npos) ? std::string::npos
+                                          : at + sizeof(kKey) - 1;
+            const size_t b64end = (b64start == std::string::npos)
+                ? std::string::npos : body.find('"', b64start);
+            if (b64start == std::string::npos || b64end == std::string::npos ||
+                b64end - b64start > kMaxDownload ||
+                !DecodeBase64(body.substr(b64start, b64end - b64start), out))
+            {
+                err = "the update source answered in an unexpected format";
+                return false;
+            }
+            return true;
+        }
+
         void Worker()
         {
+            // Try every source in order; the first one that yields a valid
+            // dictionary wins.  A source that cannot be reached, or that
+            // serves something that is not a usable dictionary, just moves
+            // the attempt on to the next mirror - only when ALL of them
+            // fail does the button report a failure (plain text; the log
+            // carries which source said what).
+            const unsigned have = translate::EntryCount();
             std::string body;
-            std::string err;
-            if (!HttpGet(body, err))
+            std::string decoded; // JSON-API payload lives here, outside the
+                                 // loop, so it can be swapped into body below
+            std::string err = "all update sources are unreachable";
+            unsigned got = 0;
+            bool valid = false;
+
+            for (const Source& src : kSources)
             {
-                Fail("%s", err.c_str());
-                return;
+                char urlName[192] = {};
+                WideCharToMultiByte(CP_UTF8, 0, src.url, -1,
+                    urlName, sizeof(urlName), nullptr, nullptr);
+
+                std::string oneErr;
+                if (!HttpGet(src.url, body, oneErr))
+                {
+                    Logf("dictionary update: source unavailable (%s): %s",
+                        urlName, oneErr.c_str());
+                    err = oneErr;
+                    continue;
+                }
+
+                const std::string* payload = &body;
+                if (src.jsonApi)
+                {
+                    if (!UnwrapGiteeJson(body, decoded, oneErr))
+                    {
+                        Logf("dictionary update: source unusable (%s): %s",
+                            urlName, oneErr.c_str());
+                        err = oneErr;
+                        continue;
+                    }
+                    payload = &decoded;
+                }
+
+                got = CountEntries(*payload);
+                if (got == 0)
+                {
+                    Logf("dictionary update: source has no usable entries "
+                        "(%s): %u bytes",
+                        urlName, static_cast<unsigned>(payload->size()));
+                    err = "the downloaded file is not a dictionary";
+                    continue;
+                }
+                if (have > 0 && got < static_cast<unsigned>(have * kMinKeepRatio))
+                {
+                    Logf("dictionary update: source looks incomplete (%s): "
+                        "%u entries (currently %u)", urlName, got, have);
+                    err = "the downloaded dictionary looks incomplete";
+                    continue;
+                }
+
+                valid = true;
+                if (src.jsonApi)
+                    body.swap(decoded); // body must hold the dictionary text
+                                        // itself - the write below uses it
+                Logf("dictionary update: using source %s (%u entries)",
+                    urlName, got);
+                break;
             }
 
-            const unsigned got = CountEntries(body);
-            const unsigned have = translate::EntryCount();
-            if (got == 0)
+            if (!valid)
             {
-                Logf("dictionary update failed: %u bytes with no usable entries",
-                    static_cast<unsigned>(body.size()));
-                Fail("the downloaded file is not a dictionary");
-                return;
-            }
-            if (have > 0 && got < static_cast<unsigned>(have * kMinKeepRatio))
-            {
-                Logf("dictionary update failed: only %u entries (currently %u)",
-                    got, have);
-                Fail("the downloaded dictionary looks incomplete");
+                Fail("%s", err.c_str());
                 return;
             }
 
@@ -291,6 +446,11 @@ namespace dict_update
             SetMessage("%u entries", got);
             g_state.store(static_cast<int>(State::Ok));
 
+            // Only a run that got this far starts the cooldown (see the
+            // constant's comment): every failure path above returns without
+            // touching the timestamp, so a retry is always immediate.
+            g_lastRunMs.store(GetTickCount64());
+
             // Tell the translation layer to re-read on its next lookup instead of
             // waiting for (and depending on) the write-time poll.  This is the
             // case the whole button exists for: the game may have been running on
@@ -313,6 +473,20 @@ namespace dict_update
         int current = g_state.load();
         if (current == static_cast<int>(State::Running))
             return; // a download is already in flight
+
+        // Cooldown: NOT a failure - nothing ran and nothing is wrong.  Show the
+        // neutral "already up to date" line beside the button; the log keeps
+        // the precise reason.
+        const unsigned long long nowMs = GetTickCount64();
+        const unsigned long long lastMs = g_lastRunMs.load();
+        if (lastMs != 0 && nowMs - lastMs < kCooldownMs)
+        {
+            g_state.store(static_cast<int>(State::UpToDate));
+            Logf("dictionary update skipped: cooldown (%u s)",
+                kCooldownMs / 1000u);
+            return;
+        }
+
         if (!g_state.compare_exchange_strong(current, static_cast<int>(State::Running)))
             return; // lost a race with another starter
 

@@ -289,6 +289,7 @@ namespace
         const char* dictUpdating;
         const char* dictUpdatedFmt;
         const char* dictFailedFmt;
+        const char* dictUpToDate;
         // [LOCAL] Page tabs + the page-2 card title.  The panel is a fixed
         // 395x440 with no scrollbar and the first page was full, so new
         // functionality goes onto a second page instead of squeezing this one.
@@ -320,6 +321,7 @@ namespace
         "下载中…",
         "已更新 %u 条",
         "更新失败：%s",
+        "已是最新版",
         "常规", "更多", "工具",
         "mod 汉化",
         "开启后，本体与模组界面里的英文文本会被替换成中文。\n"
@@ -346,6 +348,7 @@ namespace
         "Downloading...",
         "Updated %u entries",
         "Update failed: %s",
+        "Already up to date",
         "General", "More", "Tools",
         "Mod translations",
         "Replaces English text in the base game and mods with Chinese.\n"
@@ -623,6 +626,13 @@ namespace
                 {
                     ImGui::SameLine();
                     ImGui::Text(L()->dictFailedFmt, du.message);
+                }
+                else if (du.state == dict_update::State::UpToDate)
+                {
+                    // A click inside the post-success cooldown: nothing ran and
+                    // nothing failed, so it gets its own neutral line.
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dictUpToDate);
                 }
             }
             EndCard();
