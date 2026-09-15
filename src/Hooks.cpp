@@ -1128,6 +1128,15 @@ namespace hooks {
 		}				
 	}
 
+	// [LOCAL] 46-block fallback-hook state, shared by InstallD3DCompilerBlock()
+	// and ApplyHooks().  At hooks-namespace level so ApplyHooks can restore the
+	// intended state after its MH_ALL_HOOKS sweep (which would otherwise
+	// silently re-enable a hook that the config says must stay off; that
+	// flag/hook divergence then made the first menu toggle fail).
+	volatile LONG g_block46Created = 0;
+	volatile LONG g_block46Enabled = 0;
+	void* g_block46Target = nullptr;
+
 	void ApplyVMTHooks()
 	{
 
@@ -1242,6 +1251,14 @@ namespace hooks {
 		MH_CreateHook((LPVOID)REBASE(0x227BDA0), functions::hkInfo_ValueForKey, (LPVOID*)&Info_ValueForKey);
 
 		MH_EnableHook(MH_ALL_HOOKS);
+
+		// [LOCAL] The ALL_HOOKS sweep also (re-)enabled the LoadLibraryExW
+		// fallback hook that InstallD3DCompilerBlock() deliberately left
+		// disabled when the config says so.  Restore the intended state here,
+		// otherwise the flag says "off" while the hook is live and the first
+		// menu toggle fails with MH_ERROR_ENABLED.
+		if (g_block46Created && g_block46Target && g_block46Enabled == 0)
+			MH_DisableHook(g_block46Target);
 	}
 
 	void DestroyHooks()
@@ -1336,9 +1353,7 @@ namespace hooks {
 	//   created - the MinHook entry exists (created once, early)
 	//   enabled - calls actually land in hkLoadLibraryExW right now
 	//   target  - kernel32!LoadLibraryExW (fixed for the process lifetime)
-	static volatile LONG g_block46Created = 0;
-	static volatile LONG g_block46Enabled = 0;
-	static void* g_block46Target = nullptr;
+		// [LOCAL] 46-block hook state now lives at namespace level (above).
 
 	void InstallD3DCompilerBlock()
 	{
@@ -1410,14 +1425,29 @@ namespace hooks {
 		if (g_block46Created && enable != (g_block46Enabled != 0))
 		{
 			MH_STATUS rc = enable ? MH_EnableHook(g_block46Target) : MH_DisableHook(g_block46Target);
-			if (rc != MH_OK)
+			if (rc == MH_ERROR_ENABLED || rc == MH_ERROR_DISABLED)
 			{
-				d3dc_block_write_log("toggle FAILED rc=%d", (int)rc);
-				return;
+				// [LOCAL] The hook was already in the wanted state (e.g. the
+				// ALL_HOOKS sweep re-enabled it behind our back).  Treat as
+				// success and re-sync the flag.  A divergence here must NOT
+				// skip the config save below: the file rename is the layer
+				// that works, and the persisted switch is what the next
+				// launch's reconcile follows - skipping it made the rename
+				// silently revert on restart.
+				g_block46Enabled = enable ? 1 : 0;
+				d3dc_block_write_log("toggle: hook already %s, flag re-synced",
+					enable ? "enabled" : "disabled");
 			}
-
-			g_block46Enabled = enable ? 1 : 0;
-			d3dc_block_write_log(enable ? "block ENABLED from menu" : "block DISABLED from menu");
+			else if (rc != MH_OK)
+			{
+				// [LOCAL] Log only - the save below still runs.
+				d3dc_block_write_log("toggle FAILED rc=%d", (int)rc);
+			}
+			else
+			{
+				g_block46Enabled = enable ? 1 : 0;
+				d3dc_block_write_log(enable ? "block ENABLED from menu" : "block DISABLED from menu");
+			}
 		}
 
 		t7patch_config_save();
