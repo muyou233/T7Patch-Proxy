@@ -948,8 +948,13 @@ namespace
         // The warm-up frames run right after init so the font atlas is built
         // during the intro movie, not on the user's first hotkey press.  The
         // next NewFrame re-queries the display size, so resuming is seamless.
-        const bool runFrame = g_menuOpen.load() || g_warmupFrames > 0;
-        if (g_imguiReady.load() && runFrame)
+        // [LOCAL] Run the full ImGui frame every present.  A short-lived
+        // optimisation skipped it while the menu was closed, but that froze
+        // the Win32 backend's io state updates between menu sessions and,
+        // inside a match, the whole UI stopped reacting to clicks (the clicks
+        // themselves still landed).  The empty-frame cost is a few dozen
+        // microseconds - correctness wins.
+        if (g_imguiReady.load())
         {
             // [LOCAL] Time the first warm-up frame.  Its real work is ImGui's CJK
             // font atlas: ~2500 glyphs get rasterised in one go the first time
