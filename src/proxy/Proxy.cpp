@@ -357,6 +357,13 @@ namespace
                         SetEnvironmentVariableW(L"DXVK_CONFIG_FILE", confPath);
                     }
 
+                    // DXVK's own logs (blackops3_d3d11.log / blackops3_dxgi.log
+                    // in the working directory) are already silenced from
+                    // DllMain - see the note there for why that one place has
+                    // to own it: DXVK's dxgi module is up before we are, and
+                    // only DXVK_LOG_PATH (read lazily, on the first line DXVK
+                    // emits) can still be influenced in time.
+
                     for (const wchar_t* candidate : kBackendNames)
                     {
                         backendPath[0] = L'\0';

@@ -309,11 +309,21 @@ namespace
         // folder.  No extra state text: a row that reads like the translation
         // row needs no narration.
         const char* dxvkToggle;
+        // [LOCAL] The three settings the DXVK page exposes - deliberately the
+        // whole list.  Everything else stays at the documented default.
+        const char* dxvkHud;
+        const char* dxvkMaxFps;
+        const char* dxvkTear;
+        const char* dxvkTearAuto;
+        const char* dxvkTearOn;
+        const char* dxvkTearOff;
+        const char* dxvkSettingsNote;
         // [LOCAL] Page tabs + the page-2 card title.  The panel is a fixed
         // 395x440 with no scrollbar and the first page was full, so new
         // functionality goes onto a second page instead of squeezing this one.
         const char* pageGeneral;
         const char* pageMore;
+        const char* pageDxvk;
         const char* moreCard;
         const char* modTranslate;
         const char* modTranslateTip;
@@ -350,7 +360,9 @@ namespace
         "下载失败：%s",
         "已是最新版",
         "启用 DXVK",
-        "常规", "更多", "工具",
+        "HUD 元素", "帧率上限", "撕裂控制", "自动", "无撕裂", "低延迟",
+        "设置重启游戏后生效。",
+        "常规", "更多", "图形", "工具",
         "mod 汉化",
         "开启自动模组汉化（游戏必须为中文）",
         "关于"
@@ -386,7 +398,9 @@ namespace
         "Download failed: %s",
         "Already up to date",
         "Enable DXVK",
-        "General", "More", "Tools",
+        "HUD elements", "FPS cap", "Tear control", "Auto", "No tearing", "Low latency",
+        "Settings take effect after a restart.",
+        "General", "More", "Graphics", "Tools",
         "Mod translations",
         "Enables automatic mod translation (the game must be set to Chinese).",
         "About"
@@ -592,17 +606,115 @@ namespace
         // basics lives on a second page.  LangButton doubles as the tab control:
         // small, and the active one draws in accent - exactly what a tab needs.
         {
-            const bool onGeneral = g_activePage == 0;
-            if (LangButton(L()->pageGeneral, onGeneral))
+            if (LangButton(L()->pageGeneral, g_activePage == 0))
                 g_activePage = 0;
             ImGui::SameLine();
-            if (LangButton(L()->pageMore, !onGeneral))
+            if (LangButton(L()->pageDxvk, g_activePage == 1))
                 g_activePage = 1;
+            ImGui::SameLine();
+            if (LangButton(L()->pageMore, g_activePage == 2))
+                g_activePage = 2;
         }
 
-        if (g_activePage != 0)
+        if (g_activePage == 1)
         {
-            // ---- page 2: things that do not need a slot on the main page ----
+            // ---- page 2: DXVK - download, enable, configure ----------------
+            // [LOCAL] The whole feature on one page: the toggle, the fetch
+            // button and the three settings, on the card-fills-page pattern
+            // the tools page established.  It moved here from the tools page
+            // on purpose - a rendering backend is not a translation feature,
+            // and the settings need the room.
+            const float dxFill = ImGui::GetContentRegionAvail().y;
+            BeginCardSized(L()->pageDxvk, dxFill);
+            {
+                const dxvk_download::Status dx = dxvk_download::Get();
+                const bool dxDownloading = dx.state == dxvk_download::State::Running;
+                const dxvk_download::InstallState inst = dxvk_download::Query();
+                const bool dxAvailable = inst != dxvk_download::InstallState::Absent;
+                bool dxOn = inst == dxvk_download::InstallState::Enabled;
+
+                ImGui::BeginDisabled(!dxAvailable);
+                if (SolidCheckbox(L()->dxvkToggle, &dxOn) && dxAvailable)
+                {
+                    if (dxOn && inst == dxvk_download::InstallState::Parked)
+                        dxvk_download::Enable();
+                    else if (!dxOn)
+                        dxvk_download::Disable();
+                }
+                ImGui::EndDisabled();
+
+                ImGui::SameLine();
+                char dxBtn[96]{};
+                snprintf(dxBtn, sizeof(dxBtn), "%s##dxvkdownload", L()->dxvkDownload);
+                if (ImGui::Button(dxBtn, ImVec2(0.0f, 0.0f)) && !dxDownloading)
+                    dxvk_download::Start();
+                ImGui::SetItemTooltip("%s", L()->dxvkDownloadTip);
+
+                if (dxDownloading)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text("%s %u KiB", L()->dxvkDownloading,
+                        static_cast<unsigned>(dx.downloadedKiB));
+                }
+                else if (dx.state == dxvk_download::State::Ok)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dxvkOk);
+                }
+                else if (dx.state == dxvk_download::State::Failed)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text(L()->dxvkFailedFmt, dx.message);
+                }
+                else if (dx.state == dxvk_download::State::UpToDate)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dxvkUpToDate);
+                }
+
+                // ---- the three settings -----------------------------------
+                // Same disabled-until-downloaded rule as the toggle above: a
+                // conf for a backend that is not on disk is dead weight.  All
+                // three rewrite dxvk.conf and take effect on the next launch -
+                // DXVK parses the file once, at device creation.
+                dxvk_download::Conf dc = dxvk_download::ConfGet();
+
+                ImGui::BeginDisabled(!dxAvailable);
+                if (SolidCheckbox(L()->dxvkHud, &dc.hud))
+                    dxvk_download::ConfSet(dc);
+
+                ImGui::SameLine();
+                const char* tearWord = (dc.tearFree == 1) ? L()->dxvkTearOn
+                    : (dc.tearFree == 2) ? L()->dxvkTearOff : L()->dxvkTearAuto;
+                char tearBtn[96]{};
+                snprintf(tearBtn, sizeof(tearBtn), "%s: %s##dxvktear",
+                    L()->dxvkTear, tearWord);
+                if (ImGui::Button(tearBtn, ImVec2(0.0f, 0.0f)))
+                {
+                    dc.tearFree = (dc.tearFree + 1) % 3;
+                    dxvk_download::ConfSet(dc);
+                }
+
+                int prevFps = dc.maxFps;
+                ImGui::TextUnformatted(L()->dxvkMaxFps);
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(120.0f);
+                ImGui::InputInt("##dxvkmaxfps", &dc.maxFps);
+                if (dc.maxFps < 0)
+                    dc.maxFps = 0;
+                if (dc.maxFps > 1000)
+                    dc.maxFps = 1000;
+                if (ImGui::IsItemDeactivatedAfterEdit() && dc.maxFps != prevFps)
+                    dxvk_download::ConfSet(dc);
+                ImGui::EndDisabled();
+
+                ImGui::TextUnformatted(L()->dxvkSettingsNote);
+            }
+            EndCard();
+        }
+        else if (g_activePage == 2)
+        {
+            // ---- page 3: tools - things that do not need a slot on the main page ----
             // [LOCAL] The card FILLS the page: a lone auto-sized card floating in
             // an otherwise empty panel reads as broken.  Height = everything
             // above the mark's band: that band is exactly one icon tall plus one
@@ -670,61 +782,9 @@ namespace
                     ImGui::SameLine();
                     ImGui::TextUnformatted(L()->dictUpToDate);
                 }
-
-                // [LOCAL] Same row shape as the translation row above: the
-                // custom checkbox, then the fetch button, then a short state
-                // word.  The checkbox IS the switch - grey until a verified
-                // pair exists somewhere, checked once the pair sits in the
-                // game folder.  Flipping it renames the two files between the
-                // store and the game folder (same-volume renames, return in
-                // microseconds); takes effect on the next launch, because the
-                // game binds d3d11/dxgi statically at process start.  No state
-                // prose beyond the running word: a row that matches its
-                // neighbour needs no narration.
-                const dxvk_download::Status dx = dxvk_download::Get();
-                const bool dxDownloading = dx.state == dxvk_download::State::Running;
-                const dxvk_download::InstallState inst = dxvk_download::Query();
-                const bool dxAvailable = inst != dxvk_download::InstallState::Absent;
-                bool dxOn = inst == dxvk_download::InstallState::Enabled;
-
-                ImGui::BeginDisabled(!dxAvailable);
-                if (SolidCheckbox(L()->dxvkToggle, &dxOn) && dxAvailable)
-                {
-                    if (dxOn && inst == dxvk_download::InstallState::Parked)
-                        dxvk_download::Enable();
-                    else if (!dxOn)
-                        dxvk_download::Disable();
-                }
-                ImGui::EndDisabled();
-
-                ImGui::SameLine();
-                char dxBtn[96]{};
-                snprintf(dxBtn, sizeof(dxBtn), "%s##dxvkdownload", L()->dxvkDownload);
-                if (ImGui::Button(dxBtn, ImVec2(0.0f, 0.0f)) && !dxDownloading)
-                    dxvk_download::Start();
-                ImGui::SetItemTooltip("%s", L()->dxvkDownloadTip);
-
-                if (dxDownloading)
-                {
-                    ImGui::SameLine();
-                    ImGui::Text("%s %u KiB", L()->dxvkDownloading,
-                        static_cast<unsigned>(dx.downloadedKiB));
-                }
-                else if (dx.state == dxvk_download::State::Ok)
-                {
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted(L()->dxvkOk);
-                }
-                else if (dx.state == dxvk_download::State::Failed)
-                {
-                    ImGui::SameLine();
-                    ImGui::Text(L()->dxvkFailedFmt, dx.message);
-                }
-                else if (dx.state == dxvk_download::State::UpToDate)
-                {
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted(L()->dxvkUpToDate);
-                }
+                // [LOCAL] The DXVK row used to live here; it moved to the DXVK
+                // page together with its settings (a rendering backend is not
+                // a translation feature).
             }
             EndCard();
         }
@@ -878,12 +938,14 @@ namespace
         EndCard();
         } // end of page 1 (the if above was page 2's branch)
 
-        // [LOCAL] GitHub mark: PAGE 2 ONLY.  Page 1's cards auto-size and flow
+        // [LOCAL] GitHub mark: TOOLS PAGE ONLY.  Page 1's cards auto-size and flow
         // edge-to-edge with no band reserved at the bottom, so pinning the mark
         // to the panel bottom drew it on top of the config card there (2026-09-16,
-        // user screenshot).  Page 2 is the one whose full-height card leaves an
-        // exact band for it - and the user explicitly preferred it that way.
-        if (g_activePage != 0)
+        // user screenshot).  The tools page is the one whose full-height card
+        // leaves an exact band for it - and the user explicitly preferred it that
+        // way.  The DXVK page (added later) deliberately has no mark either: one
+        // repo link in one place is enough.
+        if (g_activePage == 2)
         {
             const float iconSize = ImGui::GetTextLineHeight();
             constexpr float kIconPad = 4.0f;

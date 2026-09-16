@@ -89,4 +89,37 @@ namespace dxvk_download
     // says which move failed.
     bool Enable();
     bool Disable();
+
+    // ---- dxvk.conf settings (the DXVK page) -------------------------------
+    //
+    // The overlay exposes exactly three knobs, persisted by rewriting
+    // T7Patch\dxvk\dxvk.conf - the file the proxy points DXVK at via
+    // DXVK_CONFIG_FILE.  DXVK reads it once when the device is created, so
+    // changes land on the next launch, same as the enable toggle.
+    //
+    // Deliberately a WRITE-ONLY template, not a parser-plus-merger: the file
+    // is ours (the download feature never fetches a conf), so regenerating
+    // the whole file from the UI state cannot lose edits we do not know
+    // about.  Everything the page does not expose stays at the documented
+    // default, stated in the generated comments - the three most tempting
+    // bad ideas (tearFree off Auto, pipeline library off, async) are exactly
+    // the ones this interface keeps boring.
+    struct Conf
+    {
+        bool hud = false;    // dxvk.hud - the fps/frametimes/gpuload trio,
+                             // OFF by default: a fps overlay is something the
+                             // player opts into, not ambient chrome
+        int maxFps = 0;      // dxgi.maxFrameRate - 0 = uncapped
+        int tearFree = 0;    // dxvk.tearFree - 0 Auto / 1 True / 2 False
+    };
+
+    // Cached read of the conf (documented defaults when absent).  The file is
+    // read at most once per process; afterwards the overlay's own cache is
+    // the truth, so the frame loop never touches the disk.
+    Conf ConfGet();
+
+    // Updates the cache and atomically rewrites the conf (tmp + rename, and
+    // the store directory is created on demand).  Call only when a value
+    // actually changed.
+    void ConfSet(const Conf& c);
 }

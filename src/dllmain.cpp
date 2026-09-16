@@ -807,6 +807,34 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     {
         DisableThreadLibraryCalls(hModule);
 
+        // [LOCAL] Silence DXVK's own logs (blackops3_dxgi.log /
+        // blackops3_d3d11.log in the game folder).  This has to happen here
+        // rather than in the proxy: the game statically imports dxgi.dll, so
+        // when the chained backend is enabled DXVK's own module is already up
+        // before any engine call, and DXVK latches the LOG LEVEL while that
+        // module initialises - a moment we cannot beat from a later entry
+        // point (measured: setting it in D3D11CreateDevice left dxgi.log being
+        // written, while d3d11.log stayed away because WE load that module).
+        //
+        // The two variables are read at different times, which is why both are
+        // needed:
+        //   * DXVK_LOG_LEVEL - read once, while DXVK's module starts, so our
+        //     value only reaches the modules we load ourselves (the backend);
+        //   * DXVK_LOG_PATH  - read lazily, on the first line DXVK actually
+        //     emits.  "none" means "write no log file at all", and that first
+        //     line arrives seconds later, so THIS is the one that actually
+        //     keeps the game folder clean.  Loader-lock-safe calls only (plain
+        //     kernel32, no library loads, no waits).
+        //
+        // A player who wants the logs back sets either variable to anything
+        // (DXVK_LOG_LEVEL=info, say) and we stay out of the way entirely.
+        if (GetEnvironmentVariableW(L"DXVK_LOG_LEVEL", nullptr, 0) == 0
+            && GetEnvironmentVariableW(L"DXVK_LOG_PATH", nullptr, 0) == 0)
+        {
+            SetEnvironmentVariableW(L"DXVK_LOG_LEVEL", L"none");
+            SetEnvironmentVariableW(L"DXVK_LOG_PATH", L"none");
+        }
+
         // [LOCAL] Create <game folder>\T7Patch before anything can write into
         // it.  This has to happen this early because the crash log is written
         // from an exception handler, which may fire long before the patch is
