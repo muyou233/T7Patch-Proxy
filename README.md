@@ -1,89 +1,74 @@
-# T7Patch (d3d11.dll Proxy Edition)
+# T7Patch（d3d11.dll 代理版）
 
-English | [中文](README.zh-CN.md)
+中文 | [English](README.en.md)
 
-Based on [Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src).
-T7Patch is a community security / anti-crash patch for Call of Duty: Black Ops III.
+基于 [T7Patch](https://github.com/Scroptss/T7Patch-src) 开发。
+T7Patch 是《使命召唤：黑色行动3》（BO3）的社区安全/反崩溃补丁。
 
-## What the patch does
+## 补丁功能
 
-- **Online protection**: blocks malicious packets, shielding you from attacks and griefing;
-  non-friends cannot invite you, pull you into lobbies, or interact with you
-- **Crash protection**: guards against game crashes caused by malformed packets
-- **Reduced attack surface**: closes risky entry points (workshop subscription, in-game browser)
-- **Performance**: removes the stuttering caused by DLC scanning
-- **UI localisation (mod translation)**: replaces the game's English UI text with a Chinese dictionary
-  - **One-click dictionary update**: the menu's *Update dictionary* button fetches the latest
-    version; live about 2 seconds later, no restart
-  - **Per-scene exceptions**: Multiplayer and Zombies can each be left in English
-    (default: **Multiplayer untranslated, Zombies translated**). The block applies once a session
-    is established (rooms and lobbies included); the main menu and Campaign are never affected
-  - On a game that is not running in Chinese the feature switches itself off at start-up (a
-    non-Chinese install has no Chinese glyphs, so the text would show up as boxes)
-- **Optional Vulkan rendering backend (DXVK)**: fetched from the menu's *Graphics* page (each file
-  is verified after download), then turned on with the switch beside it and applied on the next
-  launch; a Vulkan-capable GPU driver is required
-- **In-game control panel**: press `Insert` on the main menu for a visual menu - toggle every
-  feature, EN/中文 switch, no config editing needed
+- **联机防护**：拦截恶意数据包，抵御他人对你的攻击与干扰；非好友无法邀请你、拉你进房或与你互动
+- **防崩溃**：抵御各类畸形数据包引发的游戏崩溃
+- **缩小攻击面**：关闭创意工坊订阅与游戏内浏览器等高风险入口
+- **性能优化**：消除 DLC 扫描引起的卡顿
+- **界面汉化（mod 汉化）**：把游戏界面里的英文替换为中文词库
+  - **一键更新词库**：在菜单里点「更新词库」联网取最新版，下载后约 2 秒生效，无需重启游戏
+  - **按场景屏蔽**：可让「多人对局」「僵尸对局」保持英文（默认：**多人不翻译，僵尸照常翻译**）；
+    屏蔽作用在**已经建立对局的场景**（房间、大厅也算在内），主菜单与战役不受影响
+  - 游戏语言不是中文时，启动会自动关闭汉化（非中文版本没有中文字形，中文会显示成方框）
+- **可选的 Vulkan 渲染后端（DXVK）**：在菜单「图形」页一键获取（下载后自动校验文件完整性），
+  再由旁边的开关启用、重启游戏生效；需要显卡驱动支持 Vulkan
+- **游戏内控制面板**：进入主菜单后按 `Insert` 呼出菜单，可视化开关全部功能，支持中英切换
 
-## Install
+## 安装
 
-1. Get `d3d11.dll` from the [Releases](../../releases) page (or build it yourself)
-2. Close the game, copy `d3d11.dll` next to `BlackOps3.exe`
-3. Launch the game — `Patch 3.09` in the top-right corner means success; a `T7Patch\` folder is created automatically
-4. **Uninstall**: delete that `d3d11.dll`; if `dxgi.dll` and `d3d11_backend.dll` are present (DXVK),
-   delete them too - skip if absent. While the legacy shader compiler switch is on, `d3dcompiler_46.dll`
-   is renamed to `.bak` - rename it back (off by default)
+1. 从 [Releases](../../releases) 页下载 `d3d11.dll`（或自行构建）
+2. 关闭游戏，把 `d3d11.dll` 复制到游戏目录（与 `BlackOps3.exe` 同层）
+3. 启动游戏，右上角出现 `Patch 3.09` 即安装成功；游戏目录会自动生成 `T7Patch\` 文件夹
+4. **卸载**：删除该 `d3d11.dll`；若游戏目录里有 `dxgi.dll` 与 `d3d11_backend.dll`（DXVK）也一并删除，没有则忽略。
+   另外旧着色器编译器开关打开时 `d3dcompiler_46.dll` 会被改名为 `.bak`，改回原名即可（该开关默认关闭）
 
-## In-game menu
+## 游戏内菜单
 
-Press `Insert` (changeable in the menu) once you are on the main menu:
+进入主菜单后按 `Insert`（可在菜单里改）呼出控制面板：
 
-![In-game menu](docs/menu_overlay.png)
+![游戏内菜单](docs/menu_overlay.png)
 
-Three pages:
+分为三个页签：
 
-- **General**
-  - **Settings**: player name (prefilled with the game's current name) and room password -
-    each row commits with its own `Save` button
-  - **Toggles**: friends-only (applies on click), opt out of the legacy shader compiler (renames the
-    file; takes effect on the next launch), auto-open the menu on the main menu
-  - **Config**: English/Chinese switch and a custom hotkey (click the button, then press the
-    new key; `ESC` cancels)
-- **Graphics**: the optional DXVK backend - fetch / enable, plus HUD elements, frame-rate cap
-  and tearing control
-- **More**: the **mod translation** switch with its *Update dictionary* button, and two indented
-  sub-switches below it - **Turn off Multiplayer translation** (on by default) and
-  **Turn off Zombies translation** (off by default). Both are greyed out until mod translation is on
-- Game input is ignored while the menu is open, zero interference when it is closed
-- The hotkey only arms once the main menu is actually up; on the title screen and on the
-  connecting screen it does nothing
+- **常规**
+  - **设置**：玩家昵称（默认显示游戏当前名字）、房间密码 —— 每行独立 `Save` 提交
+  - **开关**：仅好友可加入（点击即生效）、隔离旧着色器编译器（默认关，文件改名，下次启动生效）、自动打开窗口
+  - **配置**：中英文切换、呼出快捷键自定义（点按钮后按新键，`ESC` 取消）
+- **图形**：可选渲染后端 DXVK —— 获取 / 启用，以及 HUD 元素、帧率上限、撕裂控制
+- **更多**：**mod 汉化**开关 + 「更新词库」按钮；其下两个缩进子开关 ——
+  **关闭多人对局翻译**（默认开）、**关闭僵尸对局翻译**（默认关），只在「mod 汉化」打开时可点
+- 菜单打开时游戏输入被屏蔽，不会误操作角色；关闭时对游戏零干扰
+- 快捷键只在**主菜单真正出现后**才生效（标题界面、连接界面按了没反应），避免启动阶段误触
 
-## Configuration
+## 配置
 
-Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
+编辑 `T7Patch\t7patch.conf`（保存后约 1 秒内热生效，无需重启游戏）：
 
-| Key | Meaning |
+| 键 | 说明 |
 |---|---|
-| `playername=` | empty = the game's current name; set = override in-game name |
-| `isfriendsonly=` | `1` = friends only (recommended) |
-| `networkpassword=` | room password, use together with friends-only |
-| `block_d3dcompiler46=` | `1` = rename `d3dcompiler_46.dll` to `.dll.bak` at launch (default off; also a menu toggle) |
-| `menu_key=` | virtual-key code that opens the menu (default `45` = Insert) |
-| `menu_auto_open=` | `1` = open the menu automatically once the main menu is up, ~1.5 s after it appears (default `1`) |
-| `menu_lang=` | `1` = Chinese (default), `0` = English |
-| `translate=` | `1` = replace English UI text with the mod-translation dictionary (default off; also a menu toggle). On a game that is not running in Chinese the start-up check switches it off and writes this back to `0` |
-| `skip_pvp=` | `1` = leave Multiplayer untranslated (default `1`). The main menu is unaffected; needs `translate=1` |
-| `skip_zm=` | `1` = leave Zombies untranslated (default `0`). Campaign is never affected; needs `translate=1` |
-| `dump_ui_strings=` | `1` = collect English UI text into `T7Patch\ui_dump.txt` for building the dictionary (default off) |
+| `playername=` | 留空 = 使用游戏当前昵称；填值 = 覆盖游戏内昵称 |
+| `isfriendsonly=` | `1` = 仅好友可加入/互动（推荐） |
+| `networkpassword=` | 房间密码，配合仅好友使用 |
+| `block_d3dcompiler46=` | `1` = 启动时把 `d3dcompiler_46.dll` 改名成 `.dll.bak`（默认关闭，菜单里也可切换） |
+| `menu_key=` | 呼出菜单的虚拟键码（默认 `45` = Insert） |
+| `menu_auto_open=` | `1` = 识别到主菜单后约 1.5 秒自动打开菜单（默认 `1`） |
+| `menu_lang=` | `1` = 中文（默认），`0` = English |
+| `translate=` | `1` = 把界面英文文本替换为模组汉化词库（默认关闭，菜单里也可切换）；游戏语言不是中文时，启动会自动关掉它并把这一项改回 `0` |
+| `skip_pvp=` | `1` = 多人对局不翻译（默认 `1`）。主菜单不受影响；需 `translate=1` |
+| `skip_zm=` | `1` = 僵尸对局不翻译（默认 `0`）。战役不受影响；需 `translate=1` |
+| `dump_ui_strings=` | `1` = 采集界面英文文本到 `T7Patch\ui_dump.txt`，供制作词库用（默认关闭） |
 
-**Upgrading from an older version**: you do not need to edit the file. Any setting it
-does not mention uses the default from the table above, and on start-up the patch
-rewrites the file in the current format - it **only fills in the missing settings and
-comments, and never changes a value you already have**.
+**从旧版本升级**：不需要手动改配置文件。旧文件里没有的项一律按上表默认值生效，
+补丁启动时还会把文件**自动重写成当前格式** —— 只补全缺失的项和注释，**已有设置的值不变**。
 
-## Credits
+## 致谢
 
-- Original project: [shiversoftdev/t7patch](https://github.com/shiversoftdev/t7patch)
-- Source upstream: [Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src)
-- DXVK: [doitsujin/dxvk](https://github.com/doitsujin/dxvk)
+- 原始项目：[shiversoftdev/t7patch](https://github.com/shiversoftdev/t7patch)
+- 源码上游：[Scroptss/T7Patch-src](https://github.com/Scroptss/T7Patch-src)
+- DXVK：[doitsujin/dxvk](https://github.com/doitsujin/dxvk)
