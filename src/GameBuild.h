@@ -33,6 +33,44 @@ namespace bo3
         return reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
     }
 
+    // [LOCAL] The raw fingerprint of the executable we are running inside.
+    // detect_build() keeps its own copy of this parsing on purpose: this file
+    // is upstream's (blob 1b2328ee from 2927b02), so the addition stays
+    // additive and the matching logic above is never touched by a local patch.
+    //
+    // Needed for the "unsupported build" warning: when no profile matches, the
+    // dialog has to be able to show the player - and a bug report - the two
+    // numbers we actually compared, instead of only saying "not supported".
+    struct Fingerprint
+    {
+        std::uint32_t timeDateStamp = 0;
+        std::uint32_t imageSize = 0;
+        bool readable = false;
+    };
+
+    inline Fingerprint read_fingerprint()
+    {
+        Fingerprint fingerprint;
+
+        const auto base = image_base();
+        if (!base) return fingerprint;
+
+        const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE || dosHeader->e_lfanew <= 0)
+            return fingerprint;
+
+        const auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+            base + static_cast<std::uintptr_t>(dosHeader->e_lfanew));
+        if (ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+            ntHeaders->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64)
+            return fingerprint;
+
+        fingerprint.timeDateStamp = ntHeaders->FileHeader.TimeDateStamp;
+        fingerprint.imageSize = ntHeaders->OptionalHeader.SizeOfImage;
+        fingerprint.readable = true;
+        return fingerprint;
+    }
+
     inline Build detect_build()
     {
         const auto base = image_base();

@@ -734,6 +734,27 @@ std::mutex g_config_mutex;
 
 struct patch_config
 {
+    // [LOCAL] One bit per key saveto() writes.  loadfrom() sets the bits it
+    // actually found in the file, so "does this file mention every setting this
+    // build knows about?" is a single mask comparison - see
+    // load_settings_initial(), which rewrites a file that is missing any of
+    // them.  Keep this list aligned with saveto()'s "outfile <<" lines: that is
+    // the only other place a key is declared, and a setting added there without
+    // a bit here would silently stop being detected as missing.
+    enum : unsigned
+    {
+        K_PLAYERNAME = 1u << 0,
+        K_ISFRIENDSONLY = 1u << 1,
+        K_NETWORKPASSWORD = 1u << 2,
+        K_BLOCK_D3DCOMPILER46 = 1u << 3,
+        K_MENU_KEY = 1u << 4,
+        K_MENU_AUTO_OPEN = 1u << 5,
+        K_MENU_LANG = 1u << 6,
+        K_TRANSLATE = 1u << 7,
+        K_DUMP_UI_STRINGS = 1u << 8,
+        K_ALL = (1u << 9) - 1,
+    };
+
     char playername[16];
     int isfriendsonly;
     // [LOCAL] A fixed inline buffer, not a heap pointer.  The old `char*` was
@@ -748,11 +769,14 @@ struct patch_config
     char networkpassword[1024];
     // [LOCAL] 1 = at launch, rename the game's legacy d3dcompiler_46.dll to
     // d3dcompiler_46.dll.bak so the engine cannot use it (see
-    // t7patch_d3dcompiler46_reconcile).  Default ON; write
-    // block_d3dcompiler46=0 into t7patch.conf and restart the game to disable.
+    // t7patch_d3dcompiler46_reconcile).  Default OFF (opt-in): write
+    // block_d3dcompiler46=1 into t7patch.conf, or tick the menu switch, to
+    // enable it and restart the game.
     int block_d3dcompiler46;
-    // [LOCAL] ImGui menu: hotkey virtual-key code (default VK_INSERT = 45)
-    // and whether the menu opens automatically at game start (default off).
+    // [LOCAL] ImGui menu: hotkey virtual-key code (default VK_INSERT = 45) and
+    // whether the menu opens automatically once the main menu is reached
+    // (default ON - the owner's call; the ~1.5 s delay before it opens belongs
+    // to overlay.cpp and is not a config value).
     int menu_key;
     int menu_auto_open;
     // [LOCAL] Overlay menu language: 1 = Chinese (default), 0 = English.
@@ -763,6 +787,11 @@ struct patch_config
     // English UI string into T7Patch\ui_dump.txt for building that dictionary.
     int translate;
     int dump_ui_strings;
+    // [LOCAL] Which of the keys above the last loadfrom() found in the file, and
+    // K_ALL once saveto() has written it.  Starts at 0 ("nothing read yet"), so
+    // a freshly constructed object - a first run with no file at all - is never
+    // mistaken for a complete one.
+    unsigned keys_seen;
     bool exists;
     std::filesystem::file_time_type modified;
 
@@ -780,6 +809,7 @@ struct patch_config
         int menu_lang;
         int translate;
         int dump_ui_strings;
+        unsigned keys_seen;
     };
 
     patch_config()
@@ -787,12 +817,18 @@ struct patch_config
         memset(playername, 0, sizeof(playername));
         memset(networkpassword, 0, sizeof(networkpassword));
         isfriendsonly = true;
-        block_d3dcompiler46 = true;
+        // [LOCAL] Default OFF since 2026-09-16 (opt-in).  The rename makes the
+        // engine fall back to the system copy of the shader compiler, and a
+        // machine without a usable one can fail right there - so it ships off
+        // and the player turns it on from the menu if they actually hit the
+        // stutter it fixes.
+        block_d3dcompiler46 = false;
         menu_key = 45;      // VK_INSERT
         menu_auto_open = 1; // auto-open on the main menu (user default)
         menu_lang = 1;      // Chinese by default
         translate = 0;      // translation off unless asked for
         dump_ui_strings = 0;
+        keys_seen = 0;      // nothing read from a file yet
         exists = false;
         modified = std::filesystem::file_time_type();
         // [LOCAL] Was: strcat_s(playername, "Unknown Soldier");
@@ -815,6 +851,7 @@ struct patch_config
         v.menu_lang = menu_lang;
         v.translate = translate;
         v.dump_ui_strings = dump_ui_strings;
+        v.keys_seen = keys_seen;
     }
 
     void publish_locked(const values& v)
@@ -828,6 +865,7 @@ struct patch_config
         menu_lang = v.menu_lang;
         translate = v.translate;
         dump_ui_strings = v.dump_ui_strings;
+        keys_seen = v.keys_seen;
     }
 
     // [LOCAL] Assumes g_config_mutex is held: its two callers (saveto and
@@ -858,7 +896,11 @@ struct patch_config
         return update_watcher_time_locked(path);
     }
 
-    void saveto(const char* path)
+    // [LOCAL] Returns false when the file could not be opened for writing (a
+    // read-only data directory, an AV scanner sitting on the file).  The caller
+    // only uses the result to say so in the log - an unwritable config is not
+    // fatal, the settings simply stay in memory for this session.
+    bool saveto(const char* path)
     {
         // [LOCAL] Locked for the whole call, including the file write.  That is
         // what serialises the writers: in steady state only the render thread
@@ -881,7 +923,7 @@ struct patch_config
         if (!outfile.is_open())
         {
             update_watcher_time_locked(path);
-            return;
+            return false;
         }
 
         // [LOCAL] Per-setting notes, each on the line(s) directly above its
@@ -906,7 +948,7 @@ struct patch_config
         outfile << "networkpassword=" << v.networkpassword << std::endl;
         outfile << std::endl;
 
-        outfile << "# 启动时把游戏目录的 d3dcompiler_46.dll 改名为 .bak，隔离旧版着色器编译器，需重启游戏生效（默认开）1/0开启关闭" << std::endl;
+        outfile << "# 启动时把游戏目录的 d3dcompiler_46.dll 改名为 .bak，隔离旧版着色器编译器，需重启游戏生效（默认关）1/0开启关闭" << std::endl;
         outfile << "block_d3dcompiler46=" << v.block_d3dcompiler46 << std::endl;
         outfile << std::endl;
 
@@ -922,7 +964,7 @@ struct patch_config
         outfile << "menu_lang=" << v.menu_lang << std::endl;
         outfile << std::endl;
 
-        outfile << "# UI 翻译：1/0开启关闭（把英文界面文本替换为 T7Patch\\translate_zh.txt 里的中文）" << std::endl;
+        outfile << "# UI 翻译：1/0开启关闭（把英文界面文本替换为 T7Patch\\translate_zh.txt 里的中文；游戏需为中文，简体/繁体均可。启动时若游戏语言不是中文，补丁会自动关掉它并把这一项改回 0）" << std::endl;
         outfile << "translate=" << v.translate << std::endl;
         outfile << std::endl;
 
@@ -931,7 +973,14 @@ struct patch_config
         outfile << std::endl;
 
         outfile.close();
+
+        // [LOCAL] The file on disk now carries every key this build knows, so
+        // record that even though only a handful of bits may have been set when
+        // it was read.  Without this a same-session check would see the stale
+        // mask and rewrite the file again on every pass.
+        keys_seen = K_ALL;
         update_watcher_time_locked(path);
+        return true;
     }
 
     void loadfrom(const char* path)
@@ -959,6 +1008,14 @@ struct patch_config
             std::lock_guard<std::mutex> lock(g_config_mutex);
             capture_locked(v);
         }
+
+        // [LOCAL] keys_seen is the one field that does NOT start from the live
+        // copy above: every bit is cleared here and only the switch cases below
+        // set one, so the finished value describes the FILE rather than the
+        // running configuration.  load_settings_initial() compares it against
+        // K_ALL to spot a config written by an older build, and rewrites that
+        // file in the current format instead of leaving a half-populated one.
+        v.keys_seen = 0;
 
         std::string line;
         // [LOCAL] Plain "while (getline(...))".  The old test was
@@ -999,6 +1056,7 @@ struct patch_config
             {
             case FNV32("playername"):
             {
+                v.keys_seen |= K_PLAYERNAME;
                 if (val.length() > 15)
                 {
                     val = val.substr(0, 15);
@@ -1009,6 +1067,7 @@ struct patch_config
             break;
             case FNV32("isfriendsonly"):
             {
+                v.keys_seen |= K_ISFRIENDSONLY;
                 std::istringstream ivalread(val);
                 ivalread >> v.isfriendsonly;
                 if (ivalread.fail())
@@ -1019,6 +1078,7 @@ struct patch_config
             break;
             case FNV32("networkpassword"):
             {
+                v.keys_seen |= K_NETWORKPASSWORD;
                 // [LOCAL] No malloc/free pair any more.  The old code freed the
                 // shared pointer, set it to NULL and only then allocated the
                 // replacement - a window in which another thread could read
@@ -1031,16 +1091,18 @@ struct patch_config
             break;
             case FNV32("block_d3dcompiler46"):
             {
+                v.keys_seen |= K_BLOCK_D3DCOMPILER46;
                 std::istringstream ivalread(val);
                 ivalread >> v.block_d3dcompiler46;
                 if (ivalread.fail())
                 {
-                    v.block_d3dcompiler46 = true; // default: enabled
+                    v.block_d3dcompiler46 = false; // default: disabled (opt-in)
                 }
             }
             break;
             case FNV32("menu_key"):
             {
+                v.keys_seen |= K_MENU_KEY;
                 std::istringstream ivalread(val);
                 ivalread >> v.menu_key;
                 // [LOCAL] Same range check t7patch_cfg_set_menu_key() applies.
@@ -1055,6 +1117,7 @@ struct patch_config
             break;
             case FNV32("menu_auto_open"):
             {
+                v.keys_seen |= K_MENU_AUTO_OPEN;
                 std::istringstream ivalread(val);
                 ivalread >> v.menu_auto_open;
                 if (ivalread.fail())
@@ -1065,6 +1128,7 @@ struct patch_config
             break;
             case FNV32("menu_lang"):
             {
+                v.keys_seen |= K_MENU_LANG;
                 std::istringstream ivalread(val);
                 ivalread >> v.menu_lang;
                 if (ivalread.fail())
@@ -1075,6 +1139,7 @@ struct patch_config
             break;
             case FNV32("translate"):
             {
+                v.keys_seen |= K_TRANSLATE;
                 std::istringstream ivalread(val);
                 ivalread >> v.translate;
                 if (ivalread.fail())
@@ -1085,6 +1150,7 @@ struct patch_config
             break;
             case FNV32("dump_ui_strings"):
             {
+                v.keys_seen |= K_DUMP_UI_STRINGS;
                 std::istringstream ivalread(val);
                 ivalread >> v.dump_ui_strings;
                 if (ivalread.fail())
@@ -1171,10 +1237,48 @@ void t7patch_cfg_set_menu_lang(int value)
 }
 
 // [LOCAL] UI translation layer switches (see src/translate.cpp).
+// [LOCAL] Language gate latch (2026-09-16).  translate::Init() sets it when the
+// game itself is not running Chinese, and it masks the mod-translation
+// switch OFF.  The stored value is written off separately by
+// load_settings_initial() below - see the note there for why it owns the write.
+//
+// Why the latch lives here rather than in translate.cpp: the FIRST Init of a
+// session runs from RunPatching() (dllmain.cpp), and load_settings_initial()
+// re-reads the conf a few ms later - which puts translate=1 straight back into
+// user_config.  Editing the config value from the gate was therefore silently
+// undone (measured 2026-09-16 12:57:36: the gate logged "switched off" and 3 ms
+// later the dictionary loaded anyway, 860 entries).  A separate latch cannot be
+// overwritten by a loadfrom(), which is exactly what makes the gate stick.
+std::atomic<bool> g_translate_language_block{ false };
+
+// [LOCAL] "The gate read a language it is sure about, and that language is not
+// Chinese" - i.e. the switch-off is meant to outlive this session.
+// Set from translate.cpp right next to the latch, consumed by
+// load_settings_initial(), which owns the write to the conf file.
+//
+// Kept separate from the latch on purpose: the latch also fires for a language
+// that could not be read at all (fail closed - see translate.cpp), and that case
+// must NOT rewrite the player's file on a guess.  Only a language we actually
+// read is persisted.
+std::atomic<bool> g_translate_persist_request{ false };
+
+void t7patch_cfg_block_translate(int blocked)
+{
+    g_translate_language_block.store(blocked != 0);
+}
+
+void t7patch_cfg_persist_translate_off()
+{
+    g_translate_persist_request.store(true);
+}
+
 bool t7patch_cfg_translate_enabled()
 {
+    // The masked answer is the EFFECTIVE state: it is what Init acts on and what
+    // the menu draws, so the switch can never read ON while the layer is held
+    // off.  The stored value is deliberately left alone (see above).
     std::lock_guard<std::mutex> lock(g_config_mutex);
-    return user_config.translate != 0;
+    return !g_translate_language_block.load() && user_config.translate != 0;
 }
 
 bool t7patch_cfg_dump_ui_strings()
@@ -1188,6 +1292,12 @@ bool t7patch_cfg_dump_ui_strings()
 // take effect is the config-apply path, which re-runs translate::Init().
 void t7patch_cfg_set_translate(int enabled)
 {
+    // [LOCAL] Only the menu turns this ON, and doing so is the player overriding
+    // the start-up language gate: release the latch, so the switch means what it
+    // says from that moment on for the rest of the session.
+    if (enabled)
+        g_translate_language_block.store(false);
+
     std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.translate = enabled ? 1 : 0;
 }
@@ -1569,9 +1679,11 @@ void apply_settings()
     // [LOCAL] Give the translation layer a retry on every config (re-)apply:
     // at start-up RunPatching may run before the config is readable, and a user
     // who flips translate=1 by hand should not have to restart the game.
-    // Init, NOT EnsureLoaded: Init re-reads the config unconditionally, so
-    // turning the switch OFF from the menu takes effect too - EnsureLoaded
-    // returns early while the layer is still enabled and would leave it running.
+    // Init, NOT EnsureLoaded: Init re-reads the config, so turning the switch
+    // OFF from the menu takes effect too - EnsureLoaded returned early while
+    // the layer was still enabled and would leave it running.  Init itself
+    // short-circuits a re-apply that changes nothing, so a menu Save no longer
+    // re-parses the dictionary or re-logs the init line.
     translate::Init();
 }
 
@@ -1731,7 +1843,95 @@ void load_settings_initial()
     else
     {
         user_config.loadfrom(PATCH_CONFIG_LOCATION);
+
+        // [LOCAL] Bring an old config file up to the current format.  Every
+        // release that adds a setting leaves the files of players who already
+        // had one without it, and loadfrom() deliberately keeps the built-in
+        // default for a key the file does not mention - so the setting works,
+        // but the file no longer shows the player what there is to configure
+        // and goes on looking like this build's format.
+        //
+        // Rewriting through saveto() loses nothing: it writes the values that
+        // were just read, so this is a reformat, not a reset.  It also drops
+        // any key this build does not know (the upstream build wrote its own);
+        // those were ignored on read anyway, so the file simply ends up
+        // agreeing with what the patch actually does.
+        //
+        // Two older formats reach this code - see the daily log, 2026-09-16 27:
+        // the upstream 3-key file (playername / isfriendsonly /
+        // networkpassword, no comments) and this fork's 7-key one from before
+        // the translation switches.  The owner's call, 2026-09-16: "if the file
+        // does not match, just generate a new one and overwrite the old".
+        unsigned missingKeys = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_config_mutex);
+            missingKeys = patch_config::K_ALL & ~user_config.keys_seen;
+        }
+
+        if (missingKeys != 0)
+        {
+            int missingCount = 0;
+            for (unsigned bit = 1; bit <= patch_config::K_ALL; bit <<= 1)
+            {
+                if (missingKeys & bit)
+                    ++missingCount;
+            }
+
+            if (user_config.saveto(PATCH_CONFIG_LOCATION))
+            {
+                char msg[160];
+                snprintf(msg, sizeof(msg), "config file was in an older format "
+                    "(%d setting(s) missing) - rewritten in the current format",
+                    missingCount);
+                overlay::DebugLog(msg);
+            }
+            else
+            {
+                // Not fatal: the settings are live for this session either way,
+                // only the file keeps the old shape.  Worth a line so "why does
+                // my conf still look old" is answerable from the log.
+                overlay::DebugLog("config file is outdated but could not be rewritten "
+                    "- is the T7Patch folder writable?");
+            }
+        }
     }
+
+    // [LOCAL] Persist the start-up language gate's decision (2026-09-16; the
+    // owner's call was "just switch it off - the menu switch is how you turn it
+    // back on").
+    //
+    // The gate itself lives in translate.cpp and has already run: the Init that
+    // RunPatching() calls before this function latches the switch off in memory
+    // when the game is not running Chinese.  A latch alone left
+    // translate=1 sitting in the conf file, which reads exactly like the setting
+    // was ignored, so the decision is written down HERE.
+    //
+    // Why here: this is the first moment the conf is known to be loaded (the
+    // loadfrom above), so a save cannot clobber the rest of the file with
+    // constructor defaults; and it keeps translate.cpp, which runs from the
+    // engine path, free of file writes.
+    //
+    // g_translate_persist_request is only set for a language that was actually
+    // read.  An unreadable localization.txt still latches the layer off for the
+    // session (fail closed) but does not rewrite the player's file on a guess.
+    if (g_translate_persist_request.exchange(false))
+    {
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(g_config_mutex);
+            if (user_config.translate != 0)
+            {
+                user_config.translate = 0;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            user_config.saveto(PATCH_CONFIG_LOCATION);
+            overlay::DebugLog("start-up language gate: mod translation switched off in the config");
+        }
+    }
+
     apply_settings();
 }
 

@@ -73,6 +73,11 @@ namespace translate
         std::atomic<bool> g_reloadRequested{ false }; // set by the updater, see RequestReload
         unsigned long long g_dictStamp = 0; // guarded by g_mutex
 
+        // [LOCAL] The start-up language gate runs once per session - see the
+        // note at the top of Init().  exchange() is the guard, so two racing
+        // Init calls (render thread + MainThread) still only run it once.
+        std::atomic<bool> g_langGateDone{ false };
+
         struct LoadResult
         {
             size_t entries = 0;
@@ -80,9 +85,9 @@ namespace translate
             size_t tooLong = 0;
         };
 
-        // "<game folder>\T7Patch" from the main module location - the process
+        // The game folder itself, from the main module location - the process
         // working directory is not guaranteed to be the game folder.
-        bool BuildDataDir(char* dirOut, size_t dirSize)
+        bool BuildGameDir(char* dirOut, size_t dirSize)
         {
             char exe[MAX_PATH] = {};
             if (GetModuleFileNameA(nullptr, exe, MAX_PATH) == 0)
@@ -91,8 +96,102 @@ namespace translate
             if (!slash)
                 return false;
             *slash = '\0';
-            const int n = snprintf(dirOut, dirSize, "%s\\T7Patch", exe);
+            const int n = snprintf(dirOut, dirSize, "%s", exe);
             return n > 0 && static_cast<size_t>(n) < dirSize;
+        }
+
+        // "<game folder>\T7Patch" - where the patch keeps its runtime files.
+        bool BuildDataDir(char* dirOut, size_t dirSize)
+        {
+            char gameDir[MAX_PATH] = {};
+            if (!BuildGameDir(gameDir, sizeof(gameDir)))
+                return false;
+            const int n = snprintf(dirOut, dirSize, "%s\\T7Patch", gameDir);
+            return n > 0 && static_cast<size_t>(n) < dirSize;
+        }
+
+        // [LOCAL] The language the GAME ITSELF booted with, straight out of the
+        // localization.txt that sits next to the executable: its first line is
+        // the language name ("simplifiedchinese", "traditionalchinese" and
+        // "english" are the three values this machine has actually produced).
+        // Comes back lower-cased and trimmed.
+        //
+        // Returns false when the file cannot be read or its first line is
+        // empty, i.e. the language could not be determined.  The start-up gate
+        // counts that as "not Chinese" too - see Init: the replacements need CJK
+        // glyphs to draw at all, so a language we cannot prove to be Chinese has
+        // to be treated the same way as one we know is not.
+        bool ReadGameLanguage(char* out, size_t outSize)
+        {
+            if (!out || outSize < 2)
+                return false;
+
+            char gameDir[MAX_PATH * 2] = {};
+            if (!BuildGameDir(gameDir, sizeof(gameDir)))
+                return false;
+            char path[MAX_PATH * 2] = {};
+            const int n = snprintf(path, sizeof(path), "%s\\localization.txt", gameDir);
+            if (n <= 0 || static_cast<size_t>(n) >= sizeof(path))
+                return false;
+
+            FILE* f = nullptr;
+            if (fopen_s(&f, path, "rb") != 0 || !f)
+                return false;
+
+            // The first line is all we need - the rest of the file is the
+            // game's localised system-dialog text.
+            char buf[128] = {};
+            const size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+            fclose(f);
+            if (got == 0)
+                return false;
+
+            size_t end = 0;
+            while (end < got && buf[end] != '\r' && buf[end] != '\n')
+                ++end;
+            size_t begin = 0;
+            if (end >= 3 && static_cast<unsigned char>(buf[0]) == 0xEF
+                && static_cast<unsigned char>(buf[1]) == 0xBB
+                && static_cast<unsigned char>(buf[2]) == 0xBF)
+                begin = 3; // UTF-8 BOM
+            while (begin < end && (buf[begin] == ' ' || buf[begin] == '\t'))
+                ++begin;
+            while (end > begin && (buf[end - 1] == ' ' || buf[end - 1] == '\t'))
+                --end;
+
+            const size_t count = end - begin;
+            if (count == 0 || count >= outSize)
+                return false;
+            for (size_t i = 0; i < count; ++i)
+            {
+                char c = buf[begin + i];
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c + ('a' - 'A'));
+                out[i] = c;
+            }
+            out[count] = '\0';
+            return true;
+        }
+
+        // [LOCAL] Can this language pack use the dictionary at all?  Any Chinese
+        // pack can, Simplified and Traditional alike:
+        //   * the dictionary's replacements are all Simplified, and on
+        //     2026-09-16 the owner tested a Traditional install: our Simplified
+        //     text renders normally there - mixed scripts, but readable, and he
+        //     liked the result.  Traditional is therefore accepted instead of
+        //     being switched off;
+        //   * everything else - English, Japanese, Russian, ... - ships no CJK
+        //     glyphs at all, so the layer could only ever paint boxes (or
+        //     invisible text) over the UI it touches.  That is what the gate is
+        //     there to prevent.
+        // Testing the "chinese" substring covers every spelling seen so far: the
+        // retail names "simplifiedchinese" / "traditionalchinese" and the Steam
+        // short forms "schinese" / "tchinese" all contain it.
+        bool IsChineseGameLanguage(const char* lang)
+        {
+            if (!lang || !*lang)
+                return false;
+            return strstr(lang, "chinese") != nullptr;
         }
 
         bool BuildDictionaryPath(char* pathOut, size_t pathSize)
@@ -653,14 +752,70 @@ namespace translate
 
     void Init()
     {
+        // [LOCAL] Start-up language gate - ONCE per session.  Every replacement
+        // in the dictionary is Simplified Chinese, and a language pack that is
+        // not Chinese ships no CJK glyphs at all, so on an English game the layer
+        // could only ever paint boxes (or invisible text) over the UI it touches.
+        // The first Init of the session (RunPatching(), dllmain.cpp, i.e. the
+        // earliest one - apply_settings() runs it a second time a few ms later)
+        // therefore checks the game's own language and latches the switch off
+        // unless that language IS Chinese - Simplified and Traditional both
+        // qualify, see IsChineseGameLanguage.
+        //
+        // Fail closed: "not Chinese" includes a language that could not be read
+        // at all.  The rule is "translation only ever runs on a Chinese game", so
+        // anything that cannot be positively identified as one - another
+        // language, or no answer at all - ends up switched off.
+        //
+        // Deliberately one-shot: a player who turns the feature back on from the
+        // menu afterwards is left alone for the rest of the session - their call,
+        // their eyes.
+        //
+        // This function only ever touches MEMORY (a latch, so the
+        // load_settings_initial() re-read 3 ms later cannot undo it) and asks the
+        // config layer to write the decision down - see g_translate_language_block
+        // and t7patch_cfg_persist_translate_off in Protection.cpp.
+        if (!g_langGateDone.exchange(true))
+        {
+            char lang[64] = {};
+            const bool known = ReadGameLanguage(lang, sizeof(lang));
+            const bool chinese = known && IsChineseGameLanguage(lang);
+            if (!chinese)
+            {
+                // Latch it - and never edit the config from HERE: this first Init
+                // runs from RunPatching(), and load_settings_initial() re-reads the
+                // conf immediately afterwards, which would put translate=1 back
+                // into memory and re-enable the layer behind the gate's back.  The
+                // write belongs to load_settings_initial(), and the request is only
+                // raised for a language we actually read (an unreadable one is
+                // still held off for the session, but does not rewrite the file).
+                t7patch_cfg_block_translate(1);
+                if (known)
+                {
+                    t7patch_cfg_persist_translate_off();
+                    Logf("init: the game's own language is \"%s\", not Chinese - "
+                        "mod translation switched off (turn it back on in the menu if you "
+                        "want it anyway)", lang);
+                }
+                else
+                    Logf("init: cannot read the game's own language (localization.txt) - "
+                        "treating it as not Chinese, mod translation off for this "
+                        "session only (turn it back on in the menu if you want it anyway)");
+            }
+        }
+
         const bool wantTranslate = t7patch_cfg_translate_enabled();
         const bool wantCollect = t7patch_cfg_dump_ui_strings();
-
-        g_collect.store(wantCollect);
+        // exchange, not load-then-store: the PREVIOUS collect flag is part of
+        // the change-detection key below, so a flipped dump_ui_strings still
+        // falls through to a real (re)load and gets its log line.
+        const bool prevCollect = g_collect.exchange(wantCollect);
 
         if (!wantTranslate)
         {
             std::lock_guard<std::mutex> lock(g_mutex);
+            if (g_dict.empty() && !g_enabled.load())
+                return; // already down - a config re-apply is a no-op, not news
             g_dict.clear();
             g_patterns.clear();
             g_dictStamp = 0;
@@ -675,11 +830,26 @@ namespace translate
             Logf("init: cannot resolve the dictionary path");
             return;
         }
+        const unsigned long long stamp = FileStamp(path);
+
+        // [LOCAL] The config-apply path re-runs Init on every menu Save, and
+        // at start-up this runs twice (RunPatching, then the first apply).
+        // Ungated, each pass re-parsed the whole dictionary and re-logged the
+        // init line - six identical "init:" lines for one settings session.
+        // A re-apply that changes nothing (same switch, same collect flag,
+        // same dictionary file in force) is a no-op: skip it silently.  The
+        // per-frame poll below still catches hand edits to the file itself.
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (g_enabled.load() && g_dictStamp == stamp
+                && prevCollect == wantCollect)
+                return;
+        }
 
         // File first, built-in second - see LoadEffectiveDictionary.  The log
         // line says which one won, because the two are indistinguishable in game.
         DictSource source = DictSource::None;
-        const LoadResult result = LoadEffectiveDictionary(path, FileStamp(path), source);
+        const LoadResult result = LoadEffectiveDictionary(path, stamp, source);
 
         Logf("init: translate=1, dictionary %s (%u entries, %u templates, collect=%d)",
             SourceName(source),

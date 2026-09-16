@@ -225,39 +225,220 @@ namespace
     }
 
     // =================================================================
-    //  Load the genuine d3d11.dll from System32 and wire up every
-    //  forwarder slot.
+    //  Load the D3D11 implementation this proxy forwards to.
+    //
+    //  Default: %SystemRoot%\System32\d3d11.dll, exactly as before.
+    //
+    //  Optional chain: when a second D3D11 implementation is dropped next
+    //  to the game executable under one of kBackendNames, that one becomes
+    //  the primary provider and System32 only fills the gaps.  This exists
+    //  because only ONE file can hold the name "d3d11.dll" in the game
+    //  folder - and that slot is this proxy - so a drop-in translation
+    //  layer (DXVK and friends) has no way in unless we carry it.
+    //
+    //  Every slot is resolved backend-first and System32-second, so no
+    //  forwarder can end up null.  The reason is the export surface: a
+    //  translation layer implements the D3D11 entry points only, while
+    //  System32 also exports the D3DKMT*/D3D11Core* ordinals this proxy
+    //  has always forwarded.  Nothing is called from both sides for one
+    //  operation - a call goes to whichever module provided that export,
+    //  and the split is written to the log.
+    //
+    //  A translation layer is only coherent together with its own DXGI:
+    //  the game imports dxgi.dll statically, so a backend paired with
+    //  Microsoft's DXGI would build swap chains across two unrelated
+    //  implementations.  The chain is therefore armed by a DXVK-built
+    //  dxgi.dll actually sitting in the game folder - that file is the
+    //  switch the player flips, and moving the pair together is what keeps
+    //  both halves in step.  A backend without it is ignored on purpose.
+    //
+    //  With no backend file present, behaviour is unchanged: one
+    //  LoadLibraryW and the same 51 GetProcAddress calls as before.
     // =================================================================
+    constexpr const wchar_t* kBackendNames[] = {
+        L"d3d11_backend.dll",   // preferred: the name says what it is
+        L"d3d11_dxvk.dll",      // alias, for a plainly renamed DXVK copy
+    };
+
+    // The translation layer's DXGI - the file that arms the chain.
+    constexpr const wchar_t* kTranslationDxgi = L"dxgi.dll";
+
+    // Read bound for the banner check.  Every DXVK module carries "DXVK" in
+    // its version string around 0.9 MB in, so 2 MB covers what we ship while
+    // staying cheap.  The buffer is static because this runs once, inside
+    // InitOnceExecuteOnce - there is no second caller to race with.
+    constexpr DWORD kMarkerScanBytes = 2 * 1024 * 1024;
+
+    bool FileCarriesDxvkBanner(const wchar_t* path)
+    {
+        HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+
+        static char buffer[kMarkerScanBytes];
+        DWORD read = 0;
+        const BOOL ok = ReadFile(file, buffer, kMarkerScanBytes, &read, nullptr);
+        CloseHandle(file);
+
+        if (!ok || read < 4)
+        {
+            return false;
+        }
+
+        for (DWORD i = 0; i + 4 <= read; ++i)
+        {
+            if (buffer[i] == 'D' && buffer[i + 1] == 'X' &&
+                buffer[i + 2] == 'V' && buffer[i + 3] == 'K')
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     BOOL CALLBACK ResolveRealD3D11(PINIT_ONCE, PVOID, PVOID*)
     {
-        // Absolute path on purpose: a bare "d3d11.dll" would resolve back
+        // Absolute paths on purpose: a bare "d3d11.dll" would resolve back
         // to this very module and recurse forever.
-        wchar_t path[MAX_PATH] = { 0 };
-        const UINT len = GetSystemDirectoryW(path, MAX_PATH);
+        wchar_t systemPath[MAX_PATH] = { 0 };
+        const UINT len = GetSystemDirectoryW(systemPath, MAX_PATH);
         if (!len || len >= MAX_PATH - 16)
         {
             ProxyLog("proxy: GetSystemDirectoryW failed, cannot load real d3d11.dll");
             return TRUE;
         }
 
-        wcscat_s(path, L"\\d3d11.dll");
+        wcscat_s(systemPath, L"\\d3d11.dll");
 
-        g_realD3D11 = LoadLibraryW(path);
-        if (!g_realD3D11)
+        // --- optional backend, sitting next to the game's own executable ---
+        wchar_t gameDir[MAX_PATH] = { 0 };
+        wchar_t backendPath[MAX_PATH] = { 0 };
+        wchar_t dxgiPath[MAX_PATH] = { 0 };
+        wchar_t confPath[MAX_PATH] = { 0 };
+        HMODULE backend = nullptr;
+        const wchar_t* backendName = nullptr;
+
+        const DWORD exeLength = GetModuleFileNameW(nullptr, gameDir, MAX_PATH);
+        if (exeLength > 0 && exeLength < MAX_PATH)
+        {
+            wchar_t* lastSlash = wcsrchr(gameDir, L'\\');
+            if (lastSlash)
+            {
+                *(lastSlash + 1) = L'\0';
+
+                // The chain is armed by the translation layer's DXGI, not by
+                // the backend - see the note above.  Content decides, not the
+                // file name: a plain copy of the system DXGI sitting there
+                // would leave the renderer just as unbalanced as no DXGI.
+                bool translationDxgi = false;
+                dxgiPath[0] = L'\0';
+                if (wcscat_s(dxgiPath, gameDir) == 0
+                    && wcscat_s(dxgiPath, kTranslationDxgi) == 0
+                    && GetFileAttributesW(dxgiPath) != INVALID_FILE_ATTRIBUTES)
+                {
+                    translationDxgi = FileCarriesDxvkBanner(dxgiPath);
+                }
+
+                if (translationDxgi)
+                {
+                    // DXVK looks at $DXVK_CONFIG_FILE before ./dxvk.conf, so
+                    // its settings can live with T7Patch's files instead of
+                    // adding one more entry to the game folder.  Anything the
+                    // player set themselves wins.
+                    confPath[0] = L'\0';
+                    if (wcscat_s(confPath, gameDir) == 0
+                        && wcscat_s(confPath, L"T7Patch\\dxvk\\dxvk.conf") == 0
+                        && GetFileAttributesW(confPath) != INVALID_FILE_ATTRIBUTES
+                        && GetEnvironmentVariableW(L"DXVK_CONFIG_FILE", nullptr, 0) == 0)
+                    {
+                        SetEnvironmentVariableW(L"DXVK_CONFIG_FILE", confPath);
+                    }
+
+                    for (const wchar_t* candidate : kBackendNames)
+                    {
+                        backendPath[0] = L'\0';
+                        if (wcscat_s(backendPath, gameDir) != 0) continue;
+                        if (wcscat_s(backendPath, candidate) != 0) continue;
+                        if (GetFileAttributesW(backendPath) == INVALID_FILE_ATTRIBUTES) continue;
+
+                        backend = LoadLibraryW(backendPath);
+                        if (backend)
+                        {
+                            backendName = candidate;
+                            break;
+                        }
+                        ProxyLog("proxy: D3D11 backend found but could not be loaded");
+                    }
+
+                    if (!backend)
+                    {
+                        // The DXGI the game already bound cannot be taken back,
+                        // so the only honest move left is to say what happened.
+                        ProxyLog("proxy: the game folder has a translation-layer dxgi.dll "
+                            "but no d3d11 backend - move both files together");
+                        t7patch_warn_startup_failure(
+                            "The game folder holds a DXVK dxgi.dll without a d3d11 backend "
+                            "next to it, so the renderer is running a mixed setup and the "
+                            "game may fail to start.  Move d3d11_backend.dll and dxgi.dll "
+                            "as a pair, or take both of them out of the game folder.");
+                    }
+                }
+                else
+                {
+                    // A backend on its own is a trap: the game would bind
+                    // Microsoft's DXGI and never reach it.  Say so once rather
+                    // than let the player wonder why nothing changed.
+                    for (const wchar_t* candidate : kBackendNames)
+                    {
+                        backendPath[0] = L'\0';
+                        if (wcscat_s(backendPath, gameDir) != 0) continue;
+                        if (wcscat_s(backendPath, candidate) != 0) continue;
+                        if (GetFileAttributesW(backendPath) == INVALID_FILE_ATTRIBUTES) continue;
+
+                        ProxyLog("proxy: D3D11 backend present without a translation-layer "
+                            "dxgi.dll - backend ignored, the two files move as a pair");
+                        break;
+                    }
+                }
+            }
+        }
+
+        g_realD3D11 = LoadLibraryW(systemPath);
+        if (!g_realD3D11 && !backend)
         {
             ProxyLog("proxy: could not load the real System32\\d3d11.dll");
             return TRUE;
         }
 
+        int fromBackend = 0;
+        int fromSystem = 0;
+        int missing = 0;
         for (int i = 0; i < kExportCount; ++i)
         {
-            g_d3d11Targets[i] = reinterpret_cast<void*>(
-                GetProcAddress(g_realD3D11, kExportNames[i]));
+            void* entry = backend
+                ? reinterpret_cast<void*>(GetProcAddress(backend, kExportNames[i]))
+                : nullptr;
 
-            if (!g_d3d11Targets[i])
+            if (entry)
             {
+                ++fromBackend;
+            }
+            else if (g_realD3D11)
+            {
+                entry = reinterpret_cast<void*>(GetProcAddress(g_realD3D11, kExportNames[i]));
+                if (entry) ++fromSystem;
+            }
+
+            g_d3d11Targets[i] = entry;
+
+            if (!entry)
+            {
+                ++missing;
                 char msg[256] = { 0 };
-                sprintf_s(msg, "proxy: real d3d11.dll has no export \"%s\" (ordinal %d)",
+                sprintf_s(msg, "proxy: no provider for export \"%s\" (ordinal %d)",
                     kExportNames[i], i);
                 ProxyLog(msg);
             }
@@ -268,7 +449,18 @@ namespace
         g_realCreateDeviceAndSwapChain = reinterpret_cast<PFN_D3D11CreateDeviceAndSwapChain>(
             g_d3d11Targets[22]);
 
-        ProxyLog("proxy: real d3d11.dll resolved");
+        if (backend)
+        {
+            char msg[256] = { 0 };
+            sprintf_s(msg,
+                "proxy: D3D11 backend \"%ls\" in use (%d exports), System32 fills %d, %d missing",
+                backendName, fromBackend, fromSystem, missing);
+            ProxyLog(msg);
+        }
+        else
+        {
+            ProxyLog("proxy: real d3d11.dll resolved");
+        }
         return TRUE;
     }
 
@@ -298,7 +490,28 @@ namespace
         // meaningless there.
         if (!bo3::supported_build())
         {
-            ProxyLog("proxy: unsupported executable, T7Patch not applied");
+            // [LOCAL] Name the two numbers the check above compared, in the log
+            // and in the notice the player gets.  Without them a "the patch
+            // stopped working" report cannot be told apart from "the game was
+            // updated again", which is the case this guard exists for.  Both
+            // read 0x00000000 when the headers could not be parsed at all.
+            char unsupportedReason[160] = { 0 };
+            const auto fingerprint = bo3::read_fingerprint();
+            sprintf_s(unsupportedReason,
+                "unsupported Black Ops III build (timestamp 0x%08X, image size 0x%08X)",
+                static_cast<unsigned int>(fingerprint.timeDateStamp),
+                static_cast<unsigned int>(fingerprint.imageSize));
+
+            char unsupportedMsg[224] = { 0 };
+            sprintf_s(unsupportedMsg, "proxy: %s, T7Patch not applied", unsupportedReason);
+            ProxyLog(unsupportedMsg);
+
+            // [LOCAL] And tell the player, not just the log.  Doing nothing in
+            // silence is indistinguishable from a broken install, and this is
+            // the one failure the user can act on (verify the game files, or
+            // wait for a patch release that follows the game update).  The
+            // notice runs on its own thread, so nothing here is blocked.
+            t7patch_warn_startup_failure(unsupportedReason);
             return 0;
         }
 

@@ -14,11 +14,8 @@ drop a single `d3d11.dll` into the game folder and you are done.
 - **Crash protection**: guards against game crashes caused by malformed packets
 - **Reduced attack surface**: closes risky entry points (workshop subscription, in-game browser)
 - **Performance**: removes the stuttering caused by DLC scanning
-- **Legacy shader compiler opt-out**: renames the engine's `d3dcompiler_46.dll` to
-  `d3dcompiler_46.dll.bak` at launch, so the engine cannot use it (renamed back when the
-  toggle is switched off)
 - **In-game control panel**: press `Insert` on the main menu for a visual menu - toggle every
-  feature above, EN/中文 switch, no config editing needed
+  feature, EN/中文 switch, no config editing needed
 
 ## What this fork changes (vs upstream)
 
@@ -77,10 +74,17 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `playername=` | empty = the game's current name; set = override in-game name |
 | `isfriendsonly=` | `1` = friends only (recommended) |
 | `networkpassword=` | room password, use together with friends-only |
-| `block_d3dcompiler46=` | `1` = rename `d3dcompiler_46.dll` to `.dll.bak` at launch (default on; also a menu toggle) |
+| `block_d3dcompiler46=` | `1` = rename `d3dcompiler_46.dll` to `.dll.bak` at launch (default off; also a menu toggle) |
 | `menu_key=` | virtual-key code that opens the menu (default `45` = Insert) |
-| `menu_auto_open=` | `1` = open the menu automatically once the main menu is up, ~1.5 s after it appears (default `0`) |
+| `menu_auto_open=` | `1` = open the menu automatically once the main menu is up, ~1.5 s after it appears (default `1`) |
 | `menu_lang=` | `1` = Chinese (default), `0` = English |
+| `translate=` | `1` = replace English UI text with the mod-translation dictionary (default off; also a menu toggle). On a game that is not running in Chinese the start-up check switches it off and writes this back to `0` |
+| `dump_ui_strings=` | `1` = collect English UI text into `T7Patch\ui_dump.txt` for building the dictionary (default off) |
+
+**Upgrading from an older version**: you do not need to edit the file. Any setting it
+does not mention uses the default from the table above, and on start-up the patch
+rewrites the file in the current format - it **only fills in the missing settings and
+comments, and never changes a value you already have**.
 
 ## Credits
 

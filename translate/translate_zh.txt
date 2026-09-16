@@ -1,5 +1,5 @@
 # T7Patch UI 翻译词库
-# version: 2026-09-16
+# version: 2026-09-16d
 # 匹配规则（实现见 src\translate.cpp）：
 #   - 引擎会把一条 UI 文本拆成若干「片段」分别送出（片段之间是控制字节），本文件按片段匹配
 #   - 键里的 '*' 匹配任意文本（模板条目，见文件末尾）；值里的 '*' 按顺序填回捕获到的原文
@@ -30,6 +30,7 @@ zombies=僵尸
 bonus=奖励内容
 play offline=离线游玩
 mods=模组
+mod=模组
 featured=精选
 quick join=快速加入
 something=某些内容
@@ -524,6 +525,12 @@ excavation site 64, northern france=法国北部 64 号发掘场
 take to the streets of morg city to combat the undead. embrace the curse to uncover its mysteries.=走上莫格城的街头对抗亡灵。接受诅咒，揭开它的秘密。
 you drove them deep into the heart of the reich. you thought they were dead. you were wrong.=你把它们逼进了帝国的心脏。你以为它们已经死了。你错了。
 
+# ═══ 僵尸：局内提示与道具说明 ═══
+elevator is active=电梯已启动
+lasts 3 minutes=持续 3 分钟
+ammo taken from stockpile instead of magazine=弹药从储备中取用，而非弹匣
+you must turn on the power first!=你必须先打开电源！
+
 # ═══ 排位 / 赛事 ═══
 pro series=职业系列赛
 ban/protects active=禁用/保护生效中
@@ -545,6 +552,34 @@ blue nile river, ethiopia=埃塞俄比亚青尼罗河
 downtown cairo, egypt=埃及开罗市中心
 highlight reel=精彩集锦
 beta=测试版
+
+# ═══ HUD / 记分板标签 ═══
+points=点数
+rounds=回合数
+round=回合
+downs=倒地次数
+revives=复活次数
+ping=延迟
+you survived=你活了下来
+instant kill=秒杀
+
+# ═══ HUD / 记分板标签（续）═══
+eliminations=消灭次数
+critical kills=致命击杀次数
+
+# ═══ 状态提示 / 暂停菜单 ═══
+loading:=加载中：
+paused=已暂停
+close=关闭
+restart level=重新开始关卡
+start menu=开始菜单
+game over=游戏结束
+end game=结束游戏
+match begins in=比赛即将开始
+low ammo=弹药不足
+no ammo=无弹药
+double xp=双倍经验
+double weapon xp=双倍武器经验
 
 # ═══ 等级 / 转生 / 战斗记录数值 ═══
 level 12=等级 12
@@ -674,6 +709,9 @@ starting round=起始回合
 zombie counter=僵尸计数
 timed gameplay=限时玩法
 t-doll zombies=战术人形僵尸
+t-dolls=战术人形
+sf units=SF 单位
+t-dolls and sf=战术人形与 SF 单位
 weaker zombies=更弱的僵尸
 roamer enabled=启用游荡者
 player health=玩家生命值
@@ -729,6 +767,19 @@ victory=胜利
 1 minute=1 分钟
 2 minutes=2 分钟
 5 minutes=5 分钟
+
+# ═══ MOD：击杀播报标签 ═══
+zombie elimination=消灭僵尸
+zombie headshot kill=爆头击杀僵尸
+zombie melee kill=近战击杀僵尸
+zombie explosive kill=爆炸击杀僵尸
+weapon obtained=获得武器
+weapon shared=分享武器
+perk acquired=获得技能
+
+# 颜色码版（玩家名/武器名在播报里是前缀，这里只收整句标签）
+^3zombie critical kill=^3致命击杀僵尸
+^3sharpshooter kill=^3神射手击杀
 
 # ═══ MOD：功能说明（僵尸 / 技能 / 游戏选项的长句）═══
 # ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
@@ -830,6 +881,11 @@ the total number of players will not exceed the player limit of party. if bots d
 maximum number of zombies that can be spawned at any time. 24 is the default. higher numbers can cause issues with lag. highest value i've tested is 40.=任意时刻可生成的僵尸数量上限。默认 24；数值过高可能导致卡顿。我测试过的最高值是 40。
 deadshot daiquiri: when you have 4 perks including deadshot, kill 5 zombies with headshots in a row to activate a x1.25 multiplier to headshot damage. you will see the deadshot icon next to the weapon's ammo count to know it is active. disappears/resets when you get a non-headshot kill.=死亡一击：当你拥有 4 个技能（含死亡一击）时，连续爆头击杀 5 只僵尸可激活爆头伤害 ×1.25 倍。激活时武器弹药数旁会显示死亡一击图标；出现非爆头击杀时该效果消失／重置。
 
+# ═══ MOD：菜单项与选项值（续）═══
+less=更少
+more=更多
+insane=疯狂
+
 # ═══ MOD：信息页、链接与 FAQ ═══
 # ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
 welcome commander!=欢迎回来，指挥官！
@@ -860,6 +916,64 @@ lots of qol improvements and other additional features are added and fine-tuned 
 ^1widow's wine^7: gives phd flopper explosive resistance (only works when there is only one damage protection perk on the map)=^1Widow's Wine^7：让 PhD Flopper 获得爆炸抗性（仅当地图上只有一个伤害防护类技能时生效）
 *: speed up the purchase of perks and gobblegums, ads, switching weapons, and melee speed, and removes the *=*：加快购买技能与泡泡糖、开镜、换枪和近战速度，并移除「首次举枪」动画
 
+# ═══ MOD：工坊模组栈界面 ═══
+workshop stack  /  ready=工坊模组栈 / 就绪
+build your mod stack=构建你的模组栈
+reset changes=重置更改
+your selection matches the loaded stack.=你的选择与已载入的模组栈一致。
+no mods selected. add mods from the left.=未选择任何模组。请从左侧添加。
+select multiple mods, arrange their priority, then apply your changes together.=可多选模组、调整优先级，然后一并应用更改。
+cancel / back=取消 / 返回
+up to date=已是最新
+
+# ═══ MOD：工坊模组栈界面（续）═══
+access denied: requires operational component=拒绝访问：需要可用的组件
+no gameplay mods are loaded.=未载入任何玩法模组。
+active load order. mod 1 has the highest priority when assets overlap.=当前生效的载入顺序。资源冲突时，模组 1 的优先级最高。
+bo3 workshop stack (experimental)=BO3 工坊模组栈（实验性）
+modern weapons | enabled gums and aat | additional perks=现代武器 | 启用泡泡糖与 AAT | 额外技能
+classic weapons | disabled gums and aat | no added perks=经典武器 | 禁用泡泡糖与 AAT | 无额外技能
+esc / b: close    scroll / up / down: browse=Esc / B：关闭    滚轮 / 上 / 下：浏览
+
+# ═══ MOD：聊天指令帮助 ═══
+/s: suicide.=/s：自杀。
+/tps: toggle thirdperson.=/tps：切换第三人称视角。
+/char: change your character.=/char：更换你的角色。
+/tpscam: load a thirdperson preset.=/tpscam：载入第三人称预设。
+/cheats: toggle cheats. host only.=/cheats：切换作弊开关。仅主机可用。
+/help or /?: print help message for chat command system.=/help 或 /?：打印聊天指令系统的帮助信息。
+/mw3intro: preview a mw3-ish intro cutscene.=/mw3intro：预览一段近似 MW3 风格的开场动画。
+you can use the chat command system by typing "/[insert command here]" in the in-game chat. below is an incomplete list of usable commands. some commands are exclusive to zombies.=你可以在游戏内聊天里输入「/[在此填写指令]」来使用聊天指令系统。以下是可用指令的不完整列表；部分指令仅限僵尸模式。
+enter / a: toggle    q / lb: up    e / rb: down    f / y: apply    r / x: reset    u / ls: clear    esc / b: cancel=Enter / A：切换    Q / LB：上移    E / RB：下移    F / Y：应用    R / X：重置    U / LS：清空    Esc / B：取消
+installed mods  /  *=已安装模组 / *
+press [l]  loaded mods (*)=按 [L] 已载入模组（*）
+load order  /  * selected=载入顺序 / 已选 *
+* has highest priority. settings profile: *=* 为最高优先级。设置方案：*
+
+# ═══ MOD：地图列表与兼容性说明 ═══
+click here for more information about the compatibility of custom maps.=点击此处了解自定义地图兼容性的更多信息。
+relive the unsettling experience of town set years after the events of tranzit.=重温「小镇」那令人不安的体验 —— 故事发生在「TranZit」事件数年之后。
+the pentagon is under attack! washington is going to defcon 1 in this installment of "zombies"=五角大楼遭到袭击！在「僵尸模式」的这一篇章里，华盛顿即将进入 DEFCON 1。
+here it is everyone! hope you all enjoy playing it as much as i did making it! :]=各位，它来了！希望你们玩得和我做的时候一样开心！:]
+most official and custom maps should work. however keep in mind that bo3 is tight on asset limits. gfl mod has already included a large amount of high quality assets so do some custom maps. certain maps are equipped with anti-cheating and don't allow the usage of mods.=大多数官方与自定义地图都能正常运行。但请记住 BO3 的资源上限很紧，GFL 模组本身已包含大量高质量资源，因此部分自定义地图可能出问题。某些地图带有反作弊机制，不允许使用模组。
+
+# ═══ MOD：t7patch 相关 FAQ（续）═══
+using t7patch is still recommended for multiplayer and zombies gameplay out of security concerns. see useful links for more infomation.=出于安全考虑，多人游戏与僵尸模式依然建议使用 T7Patch。更多信息见「实用链接」。
+are you using t7patch? for now it has some issues with campaign. revert the patch if you want to play campaign.=你在使用 T7Patch 吗？目前它与战役模式存在一些问题；如果想玩战役，请先撤下补丁。
+every mod has its standalone save data. you may copy them from somewhere else by manual. for this mod the save data is located in players\311210\3019676071.=每个模组都有独立的存档数据，你可以手动从别处复制过来。本模组的存档位于 players\311210\3019676071。
+moon and origins are one of the known maps that might crash the game for some users. if the crash persists, consider playing other compatible maps.=「月球」和「起源」是已知可能让部分玩家崩溃的地图。如果崩溃持续出现，建议改玩其他兼容地图。
+
+# ═══ MOD：地图列表与兼容性说明（续）═══
+maggot ridden corpses. bug infested swamp. hundreds of undead imperial army. choose your tactic and defend for your lives!=蛆虫遍地的尸骸。虫害肆虐的沼泽。成百上千的不死帝国军。选择你的战术，为性命而战！
+witness the origins of group 935, as an ancient evil is unleashed upon the battlefields of world war i.=见证 935 小组的起源 —— 一场古老的邪恶被释放在第一次世界大战的战场上。
+electroshock therapy. chemically engineered beverages. hordes of undead nazis. find the power to unite and send them back to their graves!=电击疗法。化学合成的饮料。成群的不死纳粹。找到团结起来的力量，把他们送回坟墓！
+the risen dead have overtaken a soviet cosmodrome and all hell has broken loose. the countdown to the zombie apocalypse has begun.=复活的死者占领了苏联航天发射场，一切彻底失控。僵尸末日的倒计时已经开始。
+a legendary shrine lost in an exotic jungle, where the undead lurk within a treacherous labyrinth of underground caverns, deadly traps and dark secrets.=一座失落在异域丛林中的传奇神殿，不死者潜伏在险恶的地下洞窟迷宫、致命陷阱与黑暗秘密之中。
+
+# ═══ MOD：地图列表与兼容性说明（续 2）═══
+shi no numa in minecraft style. have fun!=Minecraft 风格的 Shi No Numa。祝你玩得开心！
+a minecraft theme map made by scriptwo !=由 Scriptwo 制作的 Minecraft 主题地图！
+
 # ═══ 模板条目（动态数值：等级 / 转生 / 时长 / 命中次数）═══
 level *=等级 *
 prestige *=转生 *
@@ -876,6 +990,12 @@ kills *=击杀 *
 available at * (level *)=达到 *（等级 *）后解锁
 * hit (*)=* 次命中（*）
 * hits (*)=* 次命中（*）
+
+# ═══ 模板条目（动态数值：等级 / 转生 / 时长 / 命中次数）（续）═══
+loaded mods  /  *=已载入模组 / *
+
+# ═══ 模板条目（动态数值）（续 2）═══
+ping: *=延迟：*
 
 # ═══ 格式标记片段（^B 按键绑定 / $() 属性绑定 / [{...}] 令牌）═══
 [{primary}] to skip=[{primary}] 跳过

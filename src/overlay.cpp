@@ -309,6 +309,7 @@ namespace
         "旧着色器编译器状态：%s",
         "语言", "呼出按键", "请按下新按键…（ESC 取消）",
         "按 %s 呼出/隐藏",
+        "遇到卡顿时可尝试打开：隔离游戏目录里的旧版着色器编译器。\n"
         "重启游戏后生效。",
         "仅好友可以邀请/加入你。\n"
         "立即生效，重启后保持。",
@@ -324,8 +325,7 @@ namespace
         "已是最新版",
         "常规", "更多", "工具",
         "mod 汉化",
-        "开启后，本体与模组界面里的英文文本会被替换成中文。\n"
-        "改动立即生效，重启后保持。",
+        "开启自动模组汉化（游戏必须为中文）",
         "关于"
     };
     constexpr MenuText kTextEn = {
@@ -336,6 +336,8 @@ namespace
         "Legacy shader compiler status: %s",
         "Language", "Hotkey", "Press any key... (ESC cancels)",
         "Press %s to toggle",
+        "Try this if you see stutter - it isolates the legacy shader compiler\n"
+        "that ships in the game folder.\n"
         "Takes effect after a restart.",
         "Only friends can invite/join you.\n"
         "Applies instantly and is kept across restarts.",
@@ -351,8 +353,7 @@ namespace
         "Already up to date",
         "General", "More", "Tools",
         "Mod translations",
-        "Replaces English text in the base game and mods with Chinese.\n"
-        "Applies immediately and is kept across restarts.",
+        "Enables automatic mod translation (the game must be set to Chinese).",
         "About"
     };
 

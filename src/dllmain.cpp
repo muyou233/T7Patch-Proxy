@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "translate.h"  // [LOCAL] UI translation layer
 #include <tlhelp32.h> // [LOCAL] module enumeration for the crash dump
+#include <atomic>     // [LOCAL] one-shot guard on the start-up warning
 
 // Implemented in proxy/Proxy.cpp.  Loads the genuine System32\d3d11.dll and
 // fills in the export forwarder table, so this DLL can also be installed as a
@@ -519,6 +520,123 @@ void UninstallHook()
     }
 }
 
+// [LOCAL] Tell the player why T7 Patch did nothing.
+//
+// Two paths can leave the patch completely inactive:
+//   1. an unrecognised BlackOps3.exe build - proxy/Proxy.cpp refuses before
+//      RunPatching() is ever reached, and arxan_bypass::install() refuses the
+//      same way on the DLL-injection install;
+//   2. a failed Arxan anti-tamper bypass (the check right below).
+// Both used to be silent: one line in t7patch.log, and a player looking at a
+// patch that "does not work" - indistinguishable from a broken install, and
+// impossible to diagnose from a report that only says "it stopped working".
+//
+// Deliberate constraints:
+//   - SHOWN ON ITS OWN THREAD.  RunPatching() is reachable through
+//     zbr_run_gamemode_lui, an export a GSC menu can call on a game thread; a
+//     modal dialog there would stall the game until the player clicked it.
+//     With a thread of its own every path returns immediately, so the game
+//     starts and runs normally - the patch is off, nothing is blocked.  (The
+//     proxy never delayed D3D11CreateDevice either: it forwards to the real
+//     d3d11.dll first and returns that HRESULT untouched.)
+//   - at most one dialog per process: up to two of the paths can be reached
+//     depending on how the DLL was loaded.
+//   - never in a process that is not Black Ops III.  This module is a generic
+//     d3d11 proxy, so any application in that folder could load it by
+//     accident - and of course nothing about it would match a build profile.
+//   - both languages in the one box.  This runs before the config is read
+//     (there is no menu_lang to honour yet) and independently of the overlay,
+//     and the game's own language says nothing about the language in which a
+//     player reads a patch notice.
+namespace
+{
+    wchar_t g_startupWarning[3072] = { 0 };
+
+    DWORD WINAPI StartupWarningThread(LPVOID)
+    {
+        MessageBoxW(nullptr, g_startupWarning, L"T7 Patch",
+            MB_OK | MB_ICONWARNING | MB_SETFOREGROUND | MB_TOPMOST);
+        return 0;
+    }
+
+    bool ModuleIsBlackOps3()
+    {
+        wchar_t path[MAX_PATH] = { 0 };
+        const DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH) return false;
+
+        const wchar_t* name = path;
+        for (const wchar_t* cursor = path; *cursor != L'\0'; ++cursor)
+        {
+            if (*cursor == L'\\' || *cursor == L'/') name = cursor + 1;
+        }
+
+        return lstrcmpiW(name, L"BlackOps3.exe") == 0;
+    }
+
+    // ASCII only - the callers' messages are engine-side literals.
+    void AsciiToWide(const char* text, wchar_t* out, size_t outCount)
+    {
+        size_t index = 0;
+        if (outCount > 0)
+        {
+            if (text != nullptr)
+            {
+                for (; text[index] != '\0' && index + 1 < outCount; ++index)
+                    out[index] = static_cast<wchar_t>(static_cast<unsigned char>(text[index]));
+            }
+            out[index] = L'\0';
+        }
+    }
+}
+
+void t7patch_warn_startup_failure(const char* reason)
+{
+    static std::atomic<bool> warned{ false };
+    if (warned.exchange(true)) return;
+    if (!ModuleIsBlackOps3()) return;
+
+    wchar_t wideReason[512] = { 0 };
+    AsciiToWide(reason, wideReason, 512);
+
+    // One template for every failure: the caller owns the specifics, so this
+    // does not grow a branch per reason.
+    swprintf_s(g_startupWarning,
+        L"T7 Patch 未能启动 —— 游戏本体没有被修改，游戏会照常运行。\n"
+        L"\n"
+        L"原因：%ls\n"
+        L"\n"
+        L"如果游戏刚更新过，请先让 Steam 校验一次游戏文件：\n"
+        L"「库」→ 右键 Call of Duty: Black Ops III → 属性 → 已安装文件 → "
+        L"验证游戏文件的完整性。\n"
+        L"若校验之后仍然如此，说明补丁还没跟上这次游戏更新，等新版本即可。\n"
+        L"\n"
+        L"补丁版本 %hs；详细记录：T7Patch\\t7patch.log\n"
+        L"\n"
+        L"------------------------------------------------------------\n"
+        L"T7 Patch could not start - the game itself was left untouched and "
+        L"runs as usual.\n"
+        L"\n"
+        L"Reason: %ls\n"
+        L"\n"
+        L"If the game has just been updated, have Steam verify the game files "
+        L"first: Library > right-click Call of Duty: Black Ops III > Properties "
+        L"> Installed Files > Verify integrity of game files.\n"
+        L"If it still happens after that, the patch has not caught up with this "
+        L"update yet - a newer release will fix it.\n"
+        L"\n"
+        L"Patch %hs; details: T7Patch\\t7patch.log",
+        wideReason, ZBR_VERSION, wideReason, ZBR_VERSION);
+
+    // The thread reads the static buffer above; the exchange() in `warned`
+    // guarantees there is exactly one writer before it starts.
+    if (!CreateThread(nullptr, 0, StartupWarningThread, nullptr, 0, nullptr))
+    {
+        OutputDebugStringA("T7 Patch: could not create the start-up warning thread\n");
+        g_startupWarning[0] = L'\0';
+    }
+}
+
 void RunPatching()
 {
 	// Set the process priority to above normal to help with performance
@@ -527,6 +645,12 @@ void RunPatching()
     std::string arxanMessage;
     if (!arxan_bypass::install(arxanMessage))
     {
+        // [LOCAL] Tell the player too.  This covers the DLL-injection install
+        // (the proxy's own check runs first there, so this is the only place
+        // that can warn it), and it is called before the prefix below so the
+        // dialog shows the bare reason.
+        t7patch_warn_startup_failure(arxanMessage.c_str());
+
         arxanMessage = "T7 Patch: " + arxanMessage + "\n";
         OutputDebugStringA(arxanMessage.c_str());
         return;

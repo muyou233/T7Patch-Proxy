@@ -161,7 +161,7 @@ inline void t7patch_ensure_data_dir()
 // [LOCAL] Config helpers (implemented in Protection.cpp).
 // t7patch_load_config_early() reads t7patch.conf without touching the engine,
 // so it is safe from the DllMain-era thread that arms the 46 block; the getter
-// exposes the block_d3dcompiler46 switch (default: enabled).  Both are used
+// exposes the block_d3dcompiler46 switch (default: disabled).  Both are used
 // because the block is installed long before the normal settings path runs.
 void t7patch_load_config_early();
 bool t7patch_block_d3dcompiler46_enabled();
@@ -173,6 +173,8 @@ void t7patch_cfg_set_menu_lang(int value);
 // distinct English strings into T7Patch\ui_dump.txt for building it.
 bool t7patch_cfg_translate_enabled();
 void t7patch_cfg_set_translate(int enabled);
+void t7patch_cfg_block_translate(int blocked); // start-up language gate latch (Protection.cpp)
+void t7patch_cfg_persist_translate_off();     // ask load_settings_initial() to write that decision down
 bool t7patch_cfg_dump_ui_strings();
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
@@ -195,6 +197,16 @@ bool t7patch_cfg_friends_only();
 void t7patch_cfg_set_friends_only(bool v);
 void t7patch_cfg_network_password(char* dst, size_t dstSize); // [LOCAL] copies under the config lock (dstSize 1024)
 void t7patch_cfg_set_network_password(const char* v);
+// [LOCAL] Start-up failure notice (dllmain.cpp).  Called when T7 Patch refuses
+// to run in this executable: the BlackOps3.exe build is not one of the
+// profiles in GameBuild.h, or the Arxan anti-tamper bypass could not be set
+// up.  Both used to be silent - a patch that does nothing looks exactly like a
+// broken install.  The dialog is shown from its own thread (the callable
+// zbr_run_gamemode_lui export runs on a game thread and must not block), at
+// most once per process, and never in a process that is not the game.
+// reason is a short ASCII diagnostic; it is ASCII because every caller passes
+// one of the engine-side literals.
+void t7patch_warn_startup_failure(const char* reason);
 
 #define ZBR_WINDOW_TEXT "Call of Duty: Black Ops III (community patch by serious)"
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")

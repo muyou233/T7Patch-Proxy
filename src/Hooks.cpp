@@ -1383,8 +1383,8 @@ namespace hooks {
 	void InstallD3DCompilerBlock()
 	{
 		// Create the hook once.  Whether it starts ENABLED follows the config
-		// (block_d3dcompiler46, default 1); the overlay menu can flip it later
-		// at runtime without re-hooking.
+		// (block_d3dcompiler46, default 0 since 2026-09-16); the overlay menu
+		// can flip it later at runtime without re-hooking.
 		static volatile LONG create_started = 0;
 		if (InterlockedCompareExchange(&create_started, 1, 0) != 0)
 			return;
