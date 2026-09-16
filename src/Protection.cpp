@@ -752,7 +752,9 @@ struct patch_config
         K_MENU_LANG = 1u << 6,
         K_TRANSLATE = 1u << 7,
         K_DUMP_UI_STRINGS = 1u << 8,
-        K_ALL = (1u << 9) - 1,
+        K_SKIP_PVP = 1u << 9,
+        K_SKIP_ZM = 1u << 10,
+        K_ALL = (1u << 11) - 1,
     };
 
     char playername[16];
@@ -787,6 +789,21 @@ struct patch_config
     // English UI string into T7Patch\ui_dump.txt for building that dictionary.
     int translate;
     int dump_ui_strings;
+    // [LOCAL] Per-scene exceptions to 'translate' - both read as "this scene
+    // stays untranslated", so the two switches in the menu are worded the same
+    // way and a third scene would slot in without changing the shape.
+    //
+    // The defaults are the owner's call and they deliberately DIFFER: a
+    // Multiplayer match is untranslated out of the box (the strings there are
+    // player names, lobby names and workshop map names - nothing the dictionary
+    // can say anything useful about, and the interface is shared with players
+    // who do not read Chinese), while Zombies IS translated by default.  Both
+    // are opt-out, and neither touches Campaign.
+    //
+    // Stored like any other setting.  The ENGINE-side meaning of "true" is
+    // "do not translate right now" - see SetSceneBlocked in translate.cpp.
+    int skip_pvp;
+    int skip_zm;
     // [LOCAL] Which of the keys above the last loadfrom() found in the file, and
     // K_ALL once saveto() has written it.  Starts at 0 ("nothing read yet"), so
     // a freshly constructed object - a first run with no file at all - is never
@@ -809,6 +826,8 @@ struct patch_config
         int menu_lang;
         int translate;
         int dump_ui_strings;
+        int skip_pvp;
+        int skip_zm;
         unsigned keys_seen;
     };
 
@@ -828,6 +847,8 @@ struct patch_config
         menu_lang = 1;      // Chinese by default
         translate = 0;      // translation off unless asked for
         dump_ui_strings = 0;
+        skip_pvp = 1;       // ...and a Multiplayer match is the one scene it stays off in
+        skip_zm = 0;        // Zombies is translated like everything else
         keys_seen = 0;      // nothing read from a file yet
         exists = false;
         modified = std::filesystem::file_time_type();
@@ -851,6 +872,8 @@ struct patch_config
         v.menu_lang = menu_lang;
         v.translate = translate;
         v.dump_ui_strings = dump_ui_strings;
+        v.skip_pvp = skip_pvp;
+        v.skip_zm = skip_zm;
         v.keys_seen = keys_seen;
     }
 
@@ -865,6 +888,8 @@ struct patch_config
         menu_lang = v.menu_lang;
         translate = v.translate;
         dump_ui_strings = v.dump_ui_strings;
+        skip_pvp = v.skip_pvp;
+        skip_zm = v.skip_zm;
         keys_seen = v.keys_seen;
     }
 
@@ -966,6 +991,14 @@ struct patch_config
 
         outfile << "# UI 翻译：1/0开启关闭（把英文界面文本替换为 T7Patch\\translate_zh.txt 里的中文；游戏需为中文，简体/繁体均可。启动时若游戏语言不是中文，补丁会自动关掉它并把这一项改回 0）" << std::endl;
         outfile << "translate=" << v.translate << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 关闭多人对局翻译 1/0开启关闭（默认开：多人对局不翻译；建立对局后生效，主菜单不受影响）" << std::endl;
+        outfile << "skip_pvp=" << v.skip_pvp << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 关闭僵尸对局翻译 1/0开启关闭（默认关：僵尸对局照常翻译；战役不受影响）" << std::endl;
+        outfile << "skip_zm=" << v.skip_zm << std::endl;
         outfile << std::endl;
 
         outfile << "# 采集界面英文文本到 T7Patch\\ui_dump.txt（做词库用）1/0开启关闭" << std::endl;
@@ -1159,6 +1192,28 @@ struct patch_config
                 }
             }
             break;
+            case FNV32("skip_pvp"):
+            {
+                v.keys_seen |= K_SKIP_PVP;
+                std::istringstream ivalread(val);
+                ivalread >> v.skip_pvp;
+                if (ivalread.fail())
+                {
+                    v.skip_pvp = 1; // default: a match stays untranslated
+                }
+            }
+            break;
+            case FNV32("skip_zm"):
+            {
+                v.keys_seen |= K_SKIP_ZM;
+                std::istringstream ivalread(val);
+                ivalread >> v.skip_zm;
+                if (ivalread.fail())
+                {
+                    v.skip_zm = 0; // default: Zombies is translated
+                }
+            }
+            break;
             }
         }
 
@@ -1285,6 +1340,36 @@ bool t7patch_cfg_dump_ui_strings()
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
     return user_config.dump_ui_strings != 0;
+}
+
+// [LOCAL] Per-scene exceptions to the translation layer - see framework.h.
+// "true" reads as "this scene stays untranslated".  They are read by the
+// MainThread, which turns them plus the measured scene into
+// translate::SetSceneBlocked().  Two near-identical pairs on purpose: the menu
+// draws them as two independent switches, and a combined value would lose which
+// one the player ticked.
+bool t7patch_cfg_skip_pvp()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.skip_pvp != 0;
+}
+
+void t7patch_cfg_set_skip_pvp(int skip)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.skip_pvp = skip ? 1 : 0;
+}
+
+bool t7patch_cfg_skip_zm()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.skip_zm != 0;
+}
+
+void t7patch_cfg_set_skip_zm(int skip)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.skip_zm = skip ? 1 : 0;
 }
 
 // [LOCAL] Toggle the translation layer from the menu (page 2, next to the
@@ -1738,6 +1823,27 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     int lastUiLevel = -1;
     bool lastSignedIn = false;
 
+    // [LOCAL] s_runningUILevel is 0 in two very different situations: before the
+    // front-end exists at all, and for the WHOLE time a match is being played.
+    // The first one is why the engine calls in this loop are held back at all;
+    // the second one is why the scene gate must NOT be held back with them.
+    // Measured 2026-09-16: with the gate tied to the current level it froze for
+    // the entire match, so flipping either switch in the menu - or hand-editing
+    // t7patch.conf - only took effect after walking back out to the lobby.  That
+    // is what "I ticked 关闭僵尸翻译 and Zombies was still translated" was.
+    // One latch separates the two situations: once the level has been non-zero,
+    // the engine UI is up for good (it does not un-boot mid-session).
+    bool uiEverUp = false;
+
+    // [LOCAL] Scene gate edge detection - see the block inside the loop.
+    // lastSceneMode is the session mode the last log line saw, so the log prints
+    // once per SCENE change (into a match, back out, into Zombies) instead of
+    // once per tick.  It is also the diagnostic that answers "which mode code
+    // does Zombies report?", which is what decides whether the two letter codes
+    // single the two modes out at all.
+    bool lastSceneBlocked = false;
+    char lastSceneMode[16] = {};
+
     // [LOCAL] NOTE: do NOT call Live_SystemInfo() with arbitrary infoTypes to
     // probe the connection state.  Tried on 2026-09-14 and it hard-crashes the
     // game at the front-end transition: the function walks a table of info
@@ -1776,21 +1882,36 @@ DWORD WINAPI MainThread(LPVOID lpParam)
                 overlay::DebugLog(msg);
             }
 
-            // Only safe to call game functions once the game UI is running.
+            // [LOCAL] Latch first: from here on, "the engine UI is up" stops
+            // depending on the CURRENT level.  A match sets the level back to 0
+            // and the scene gate below has to keep ticking through it (see the
+            // note where uiEverUp is declared).
             if (lastUiLevel != 0)
+                uiEverUp = true;
+
+            // Only safe to call game functions once the game UI is running.
+            if (uiEverUp)
             {
-                // [LOCAL] Diagnostic only since 2026-09-15: the gate no longer
-                // consults the sign-in state (the screen signal replaced it), but
-                // the log line is what tells us whether the front-end reached the
-                // online lobby at all when something goes wrong.
-                const bool signedIn = Live_IsUserSignedInToDemonware(CONTROLLER_INDEX_0);
-                if (signedIn != lastSignedIn)
+                // [LOCAL] Still tied to the CURRENT level, unlike everything
+                // below it: this one asks demonware rather than reading a plain
+                // engine table, and there is nothing it could report mid-match
+                // that the log is missing.
+                //
+                // Diagnostic only since 2026-09-15: the gate no longer consults
+                // the sign-in state (the screen signal replaced it), but the log
+                // line is what tells us whether the front-end reached the online
+                // lobby at all when something goes wrong.
+                if (lastUiLevel != 0)
                 {
-                    lastSignedIn = signedIn;
-                    char msg[64]{};
-                    snprintf(msg, sizeof(msg), "gate: demonware signed in = %d",
-                        signedIn ? 1 : 0);
-                    overlay::DebugLog(msg);
+                    const bool signedIn = Live_IsUserSignedInToDemonware(CONTROLLER_INDEX_0);
+                    if (signedIn != lastSignedIn)
+                    {
+                        lastSignedIn = signedIn;
+                        char msg[64]{};
+                        snprintf(msg, sizeof(msg), "gate: demonware signed in = %d",
+                            signedIn ? 1 : 0);
+                        overlay::DebugLog(msg);
+                    }
                 }
 
                 // [LOCAL] THE gate: real screen detection.  The game resolves the
@@ -1821,6 +1942,108 @@ DWORD WINAPI MainThread(LPVOID lpParam)
                 // here have been removed: they answered their question (none of
                 // them separates the "press ENTER" screen from the main menu -
                 // see the note before the loop) and only added log noise.
+
+                // [LOCAL] The scene gate: "the player is inside a match in a mode
+                // they asked to leave untranslated".
+                //
+                // This is the one part of the block that also runs while a match
+                // is being played, i.e. while s_runningUILevel is back to 0 -
+                // that is the whole point of uiEverUp above.  Without it the gate
+                // only ever re-evaluated on the way out of a match, so a switch
+                // flipped in the menu over a match did nothing until the player
+                // returned to the lobby.
+                //
+                // Two engine FACTS, asked only while translation is on at all -
+                // the switches are meaningless while the feature they belong to
+                // is off, and this way a switched-off feature costs no engine
+                // call and prints no log line:
+                //
+                //   Com_SessionMode_GetModeName() - the session mode the engine
+                //   itself is in.  It returns the two-letter code the upstream
+                //   build already compares against ("CP" = Campaign), so "MP" is
+                //   Multiplayer and "ZM" is Zombies.
+                //
+                //   CL_GetConfigString(0) - the server info string, which only
+                //   exists once a match has been joined.  That is what separates
+                //   "sitting in the Multiplayer menus" (mode is ALREADY "MP",
+                //   nothing is joined) from "actually playing".  Only the latter
+                //   may be held off: the menus and the lobby are exactly the part
+                //   of Multiplayer the dictionary is for.  Zombies has no such
+                //   split in practice - its mode is only entered with a match -
+                //   but it is asked the same question so both switches mean the
+                //   same thing.
+                //
+                // Both are plain queries made from the MainThread, the only
+                // thread this project has ever called engine functions from.  The
+                // render thread never sees them - it reads the atomic through
+                // translate::Enabled().  Compared with _stricmp rather than
+                // Protection::I_stricmp: that function pointer is installed by
+                // the patch's own hook setup, and this loop has no business
+                // depending on that having happened already.
+                if (t7patch_cfg_translate_enabled())
+                {
+                    char modeBuf[16] = {};
+                    const char* mode = Com_SessionMode_GetModeName();
+                    if (mode)
+                        strncpy_s(modeBuf, sizeof(modeBuf), mode, _TRUNCATE);
+
+                    // Which of the two scene switches this mode is subject to, if
+                    // any.  Campaign is in neither list on purpose: it has no
+                    // switch and is always translated (nothing there is shared
+                    // with other players, so there is nothing to decide).
+                    const bool multiplayer = modeBuf[0] != 0 && _stricmp(modeBuf, "MP") == 0;
+                    const bool zombies     = modeBuf[0] != 0 && _stricmp(modeBuf, "ZM") == 0;
+
+                    // "Is a match actually being played right now?" - the server
+                    // info string only exists once one has been joined.  Asked
+                    // only for the two modes that have a switch: nowhere else can
+                    // the answer change the outcome, and staying away from the
+                    // config-string table the rest of the time keeps this gate's
+                    // footprint as small as it can be.
+                    bool inMatch = false;
+                    if (multiplayer || zombies)
+                    {
+                        const char* serverInfo = CL_GetConfigString(0);
+                        inMatch = serverInfo != nullptr && serverInfo[0] != 0;
+                    }
+
+                    // One answer for the layer, two switches behind it.  Note
+                    // that the defaults differ (matches off, Zombies on) - that
+                    // is the owner's call and lives in the config defaults, not
+                    // here.
+                    const bool blocked = inMatch
+                        && ((multiplayer && t7patch_cfg_skip_pvp())
+                            || (zombies && t7patch_cfg_skip_zm()));
+
+                    translate::SetSceneBlocked(blocked);
+
+                    // Logged on every SCENE change, not on every toggle: the
+                    // mode string is part of the key on purpose.  It is the
+                    // measurement that says whether "MP" and "ZM" really are the
+                    // codes these two modes report - if Zombies turned out to
+                    // report "MP" (or anything else), its line would say so, and
+                    // the Zombies switch is the one that would then never fire.
+                    // The answer is not inferable, which is why it is printed.
+                    if (blocked != lastSceneBlocked || strcmp(modeBuf, lastSceneMode) != 0)
+                    {
+                        lastSceneBlocked = blocked;
+                        strncpy_s(lastSceneMode, sizeof(lastSceneMode), modeBuf, _TRUNCATE);
+
+                        char msg[192]{};
+                        snprintf(msg, sizeof(msg), "scene gate: session mode \"%s\", "
+                            "in-match=%d -> translation %s",
+                            modeBuf[0] ? modeBuf : "(unreadable)",
+                            inMatch ? 1 : 0, blocked ? "off" : "on");
+                        overlay::DebugLog(msg);
+                    }
+                }
+                else
+                {
+                    // Translation is off, so there is nothing to hold off - and
+                    // no engine call is made at all.
+                    translate::SetSceneBlocked(false);
+                    lastSceneBlocked = false;
+                }
             }
         }
 

@@ -37,6 +37,18 @@ namespace translate
         std::atomic<bool> g_enabled{ false }; // translate=1 AND the dictionary loaded
         std::atomic<bool> g_collect{ false }; // dump_ui_strings=1
 
+        // [LOCAL] Scene gate - "the player is inside a match, in a mode whose
+        // 'do not translate this scene' switch is on" (see SetSceneBlocked in
+        // translate.h; the switch itself lives in the config, the decision is
+        // made in Protection.cpp's MainThread loop and only the RESULT arrives
+        // here).  Deliberately separate from g_enabled: g_enabled is "the
+        // dictionary is loaded and the feature is switched on", which stays true
+        // through a match, so leaving and re-entering one costs nothing but this
+        // flag - no reload, no log line, no dictionary parse.  The render thread
+        // reads it on every UI string, hence the atomic; the MainThread writes it
+        // at most once a second.
+        std::atomic<bool> g_sceneBlocked{ false };
+
         // [LOCAL] Diagnostics.  "I turned translation on and nothing happened"
         // has to be answerable from the log alone: these lines say whether the
         // switch was seen, which dictionary won, and whether lookups ever match.
@@ -878,7 +890,17 @@ namespace translate
 
     bool Enabled()
     {
-        return g_enabled.load();
+        // Two independent questions, one answer for the callers: is the feature
+        // on (dictionary loaded, switch on, language gate passed), and is this
+        // moment one the player asked to leave alone.  Folding the scene gate in
+        // HERE is what keeps Hooks.cpp untouched - both hooks and the collector
+        // already ask Enabled().
+        return g_enabled.load() && !g_sceneBlocked.load();
+    }
+
+    void SetSceneBlocked(bool blocked)
+    {
+        g_sceneBlocked.store(blocked);
     }
 
     bool DictionaryPath(char* out, size_t outSize)
@@ -996,6 +1018,15 @@ namespace translate
     void Collect(const char* text)
     {
         if (!g_collect.load() || !text || !text[0])
+            return;
+
+        // [LOCAL] The scene gate covers collection too, and that is the point of
+        // it here: inside a Multiplayer match the front-end strings the game
+        // builds are first and foremost PLAYER NAMES, lobby names and workshop
+        // map names - exactly the noise that used to fill ui_dump.txt and make
+        // the "what is still English?" worklist unusable.  With the sub-switch on
+        // the dump stays clean for free.
+        if (g_sceneBlocked.load())
             return;
 
         // Same run split as Lookup: the dump has to hold exactly the pieces the

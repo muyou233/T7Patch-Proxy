@@ -175,6 +175,16 @@ bool t7patch_cfg_translate_enabled();
 void t7patch_cfg_set_translate(int enabled);
 void t7patch_cfg_block_translate(int blocked); // start-up language gate latch (Protection.cpp)
 void t7patch_cfg_persist_translate_off();     // ask load_settings_initial() to write that decision down
+// [LOCAL] Per-scene exceptions to the translation switch above - both read as
+// "this scene stays untranslated".  They only ever matter while translate is on;
+// they describe a scene, not a value the menu overrides (see SetSceneBlocked in
+// translate.cpp); and their defaults deliberately differ - skip_pvp ON (a
+// Multiplayer match is untranslated out of the box), skip_zm OFF (Zombies is
+// translated).  Nothing else reads them; the menu switches are the only writers.
+bool t7patch_cfg_skip_pvp();
+void t7patch_cfg_set_skip_pvp(int skip);
+bool t7patch_cfg_skip_zm();
+void t7patch_cfg_set_skip_zm(int skip);
 bool t7patch_cfg_dump_ui_strings();
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
@@ -212,7 +222,7 @@ void t7patch_warn_startup_failure(const char* reason);
 // [LOCAL] display string trimmed to just the version (was "Patch 3.06 - by serious <3")
 // [LOCAL] Split so the overlay title can say "T7Patch <ver>" while the game
 // window text keeps "Patch <ver>" - bump ZBR_VERSION only.
-#define ZBR_VERSION "3.08"
+#define ZBR_VERSION "3.09"
 #define ZBR_VERSION_FULL "Patch " ZBR_VERSION
 #define SPOOF_UNLOCK_ALL false
 #define SPOOF_SKIP_CWL false

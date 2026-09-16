@@ -327,6 +327,16 @@ namespace
         const char* moreCard;
         const char* modTranslate;
         const char* modTranslateTip;
+        // [LOCAL] Sub-switches of the row above: "leave this scene untranslated".
+        // Worded the same way on purpose, so a third scene would slot in without
+        // changing the shape.  Their defaults differ by design - a Multiplayer
+        // match is untranslated out of the box, Zombies is translated.  They are
+        // exceptions to the switch above, never a second way to switch
+        // translation on; see translate::SetSceneBlocked.
+        const char* pvpSkip;
+        const char* pvpSkipTip;
+        const char* zmSkip;
+        const char* zmSkipTip;
         const char* about;
     };
 
@@ -365,6 +375,14 @@ namespace
         "常规", "更多", "图形", "工具",
         "mod 汉化",
         "开启自动模组汉化（游戏必须为中文）",
+        "关闭多人对局翻译",
+        "默认开启：多人对局保持英文。\n"
+        "建立对局后生效（房间、大厅也算在内）；主菜单不受影响。\n"
+        "（需先开启 mod 汉化）",
+        "关闭僵尸对局翻译",
+        "默认关闭：僵尸对局照常翻译。\n"
+        "打开后僵尸对局也不翻译；战役不受影响。\n"
+        "（需先开启 mod 汉化）",
         "关于"
     };
     constexpr MenuText kTextEn = {
@@ -403,6 +421,14 @@ namespace
         "General", "More", "Graphics", "Tools",
         "Mod translations",
         "Enables automatic mod translation (the game must be set to Chinese).",
+        "Turn off Multiplayer translation",
+        "On by default: Multiplayer is left in English.\n"
+        "Applies once a session is established (rooms and lobbies included);\n"
+        "the main menu is unaffected.  (Requires mod translation.)",
+        "Turn off Zombies translation",
+        "Off by default: Zombies is translated normally.  Tick this to leave\n"
+        "Zombies untranslated as well.  Campaign is unaffected.\n"
+        "(Requires mod translation.)",
         "About"
     };
 
@@ -491,8 +517,14 @@ namespace
             *v = !*v;
 
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        const ImU32 fill = IM_COL32(255, 117, 1, 255);   // #FF7501
-        const ImU32 outline = IM_COL32(150, 90, 20, 255);
+        // [LOCAL] Hand-drawn colours do not pick up style.Alpha on their own the
+        // way Text() does, so a BeginDisabled()'d box would stay fully saturated
+        // and keep looking clickable.  Fold the alpha in: the two scene
+        // sub-switches on the Tools page are greyed out while mod 汉化 is off,
+        // and that has to be visible on the box, not only on its label.
+        const int boxAlpha = (int)(style.Alpha * 255.0f + 0.5f);
+        const ImU32 fill = IM_COL32(255, 117, 1, boxAlpha);   // #FF7501
+        const ImU32 outline = IM_COL32(150, 90, 20, boxAlpha);
         const ImVec2 p0(pos.x, boxY);
         const ImVec2 p1(pos.x + boxSize, boxY + boxSize);
         // [LOCAL] The on-state is an outline PLUS an inset core, so a sliver of
@@ -782,6 +814,43 @@ namespace
                     ImGui::SameLine();
                     ImGui::TextUnformatted(L()->dictUpToDate);
                 }
+                // [LOCAL] The translation switch's SUB-switches, on their own
+                // lines and indented, because that is what they are: they only
+                // ever have an effect while the switch above is on (the patch
+                // does not even measure the scene otherwise - see the MainThread
+                // loop in Protection.cpp).
+                //
+                // [LOCAL] Greyed out while that switch is off - the owner's call,
+                // 2026-09-16 ("关了之后这两子开关变为不可点选项").  This once
+                // went the other way, for a reason that no longer holds: a
+                // disabled item used to swallow hover, which would have left the
+                // tooltips - the one place the dependency is spelled out -
+                // unreadable.  imgui 1.92's tooltip flags carry
+                // AllowWhenDisabled (HoverFlagsForTooltipMouse), so they still
+                // show; the box itself honours style.Alpha, see SolidCheckbox.
+                const bool transOn = t7patch_cfg_translate_enabled();
+                ImGui::BeginDisabled(!transOn);
+                ImGui::Indent(12.0f);
+
+                bool pvpSkip = t7patch_cfg_skip_pvp();
+                if (SolidCheckbox(L()->pvpSkip, &pvpSkip))
+                {
+                    t7patch_cfg_set_skip_pvp(pvpSkip ? 1 : 0);
+                    t7patch_config_save();
+                }
+                ImGui::SetItemTooltip("%s", L()->pvpSkipTip);
+
+                bool zmSkip = t7patch_cfg_skip_zm();
+                if (SolidCheckbox(L()->zmSkip, &zmSkip))
+                {
+                    t7patch_cfg_set_skip_zm(zmSkip ? 1 : 0);
+                    t7patch_config_save();
+                }
+                ImGui::SetItemTooltip("%s", L()->zmSkipTip);
+
+                ImGui::Unindent(12.0f);
+                ImGui::EndDisabled();
+
                 // [LOCAL] The DXVK row used to live here; it moved to the DXVK
                 // page together with its settings (a rendering backend is not
                 // a translation feature).

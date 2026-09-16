@@ -48,6 +48,23 @@ namespace translate
     // True when the translate=1 switch is on (dictionary loaded and non-empty).
     bool Enabled();
 
+    // [LOCAL] Scene gate: "the player is inside a match, in a mode whose 'do not
+    // translate this scene' switch is on" (Multiplayer and Zombies each have
+    // one; their defaults differ and Campaign has none).  Owner of the state,
+    // and why it is not simply another config flag: this is a SCENE, so it
+    // changes by itself as the player enters and leaves a match, and a menu
+    // click must not be able to clear it (turning the switch off is what does).
+    // It is folded into Enabled() and Collect() rather than into the config
+    // layer, so the menu keeps drawing the player's own switch values while the
+    // layer is held off - the two are not the same question here, unlike the
+    // start-up language latch.
+    //
+    // The MainThread's 1 Hz loop owns the answer (it is the only place allowed
+    // to call into the engine); the render thread only ever reads the atomic.
+    // SetSceneBlocked(false) is therefore the correct start-up state: nothing
+    // is known to be blocked until a match has been measured.
+    void SetSceneBlocked(bool blocked);
+
     // Run-wise lookup.  On a hit, copies the translated string into 'out'
     // (bounded) and returns true; returns false when nothing matched or the
     // result would not fit, in which case the caller keeps the original text.

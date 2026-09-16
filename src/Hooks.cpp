@@ -4,6 +4,7 @@
 #include "translate.h"   // [LOCAL] UI string translation layer
 #include <cstdarg>
 #include <atomic>
+#include <cstring>
 
 const char zbr_window_text[] = ZBR_WINDOW_TEXT;
 void* pOriginalGSFailure = nullptr;

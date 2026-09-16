@@ -1,5 +1,5 @@
 # T7Patch UI 翻译词库
-# version: 2026-09-16h
+# version: 2026-09-16i
 # 匹配规则（实现见 src\translate.cpp）：
 #   - 引擎会把一条 UI 文本拆成若干「片段」分别送出（片段之间是控制字节），本文件按片段匹配
 #   - 键里的 '*' 匹配任意文本（模板条目，见文件末尾）；值里的 '*' 按顺序填回捕获到的原文
@@ -705,6 +705,8 @@ available at lieutenant general iii (level 51)=达到中将 III（等级 51）�
 # ═══ MOD：菜单项与选项值 ═══
 # ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 缩写（ZM / MOD / AAT…）/ 其他专有名词一律不翻（不要为它们加条目）。（唯一例外 = 用户指定的 All-around Enhancement，见文末「MOD 名」节）
 tf's zombie options=TF 的僵尸选项
+modernized=现代
+legacy=传统
 mod info=模组信息
 version 2.21.0=版本 2.21.0
 enable mod menu=启用模组菜单
