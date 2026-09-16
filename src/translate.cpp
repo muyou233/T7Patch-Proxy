@@ -614,15 +614,28 @@ namespace translate
         // pages it in from the image on demand.
         bool LoadBuiltinDictionary(std::string& out)
         {
+            // The RCDATA lives in THIS module, so this module is what has to be
+            // asked for it.  A NULL hModule does not mean "the caller" - it means
+            // "the module the process was created from", i.e. BlackOps3.exe, which
+            // carries no RT_RCDATA at all.  Asking there always failed, so every
+            // install without an external translate_zh.txt silently ran with the
+            // whole feature off.  Resolve our own handle from the address of this
+            // very function: no global, no init-order dependency.
+            HMODULE self = nullptr;
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    reinterpret_cast<LPCWSTR>(&LoadBuiltinDictionary), &self) || !self)
+                return false;
+
             // TCHAR flavour on purpose: RT_RCDATA and MAKEINTRESOURCE expand to
             // their WIDE forms in this project, and pairing them with an explicit
             // ...A call is a type error (C2664).
-            const HRSRC res = FindResource(nullptr,
+            const HRSRC res = FindResource(self,
                 MAKEINTRESOURCE(IDR_TRANSLATE_DICT), RT_RCDATA);
             if (!res)
                 return false;
-            const DWORD size = SizeofResource(nullptr, res);
-            const HGLOBAL handle = LoadResource(nullptr, res);
+            const DWORD size = SizeofResource(self, res);
+            const HGLOBAL handle = LoadResource(self, res);
             if (!handle || size == 0)
                 return false;
             const void* data = LockResource(handle);
@@ -748,6 +761,7 @@ namespace translate
             fprintf(f, "%s\n", text);
             fclose(f);
         }
+
     }
 
     void Init()
@@ -1013,4 +1027,5 @@ namespace translate
             AppendCollectedLocked(clean);
         }
     }
+
 }

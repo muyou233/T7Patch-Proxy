@@ -1,5 +1,5 @@
 # T7Patch UI 翻译词库
-# version: 2026-09-16d
+# version: 2026-09-16h
 # 匹配规则（实现见 src\translate.cpp）：
 #   - 引擎会把一条 UI 文本拆成若干「片段」分别送出（片段之间是控制字节），本文件按片段匹配
 #   - 键里的 '*' 匹配任意文本（模板条目，见文件末尾）；值里的 '*' 按顺序填回捕获到的原文
@@ -30,7 +30,6 @@ zombies=僵尸
 bonus=奖励内容
 play offline=离线游玩
 mods=模组
-mod=模组
 featured=精选
 quick join=快速加入
 something=某些内容
@@ -525,6 +524,38 @@ excavation site 64, northern france=法国北部 64 号发掘场
 take to the streets of morg city to combat the undead. embrace the curse to uncover its mysteries.=走上莫格城的街头对抗亡灵。接受诅咒，揭开它的秘密。
 you drove them deep into the heart of the reich. you thought they were dead. you were wrong.=你把它们逼进了帝国的心脏。你以为它们已经死了。你错了。
 
+# ═══ 多人 / DLC 地图名（加载屏同名大写形态由大小写不敏感匹配自动覆盖）═══
+aquarium=水族馆
+breach=突破口
+combine=联合体
+evac=撤离点
+exodus=大迁徙
+fringe=边缘地带
+havoc=浩劫
+infection=感染区
+metro=地铁站
+redwood=红杉林
+stronghold=要塞
+nuk3town=核弹镇
+rise=崛起
+splash=水上乐园
+skyjacked=空艇突袭
+gauntlet=试炼场
+knockout=击倒
+rift=裂谷
+spire=尖塔
+verge=临界点
+rumble=轰鸣
+berserk=狂战
+cryogen=低温实验室
+empire=帝国
+citadel=城堡
+micro=微观世界
+outlaw=亡命之徒
+rupture=崩裂
+redwood snow=红杉林·雪
+fringe nightfall=边缘地带·夜幕
+
 # ═══ 僵尸：局内提示与道具说明 ═══
 elevator is active=电梯已启动
 lasts 3 minutes=持续 3 分钟
@@ -672,7 +703,7 @@ available at major general iii (level 48)=达到少将 III（等级 48）后解�
 available at lieutenant general iii (level 51)=达到中将 III（等级 51）后解锁
 
 # ═══ MOD：菜单项与选项值 ═══
-# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
+# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 缩写（ZM / MOD / AAT…）/ 其他专有名词一律不翻（不要为它们加条目）。（唯一例外 = 用户指定的 All-around Enhancement，见文末「MOD 名」节）
 tf's zombie options=TF 的僵尸选项
 mod info=模组信息
 version 2.21.0=版本 2.21.0
@@ -781,8 +812,14 @@ perk acquired=获得技能
 ^3zombie critical kill=^3致命击杀僵尸
 ^3sharpshooter kill=^3神射手击杀
 
+
+# 颜色码版（续：漏掉的三个击杀勋章）
+^3zombie headshot kill=^3爆头击杀僵尸
+^3zombie melee kill=^3近战击杀僵尸
+^3zombie explosive kill=^3爆炸击杀僵尸
+
 # ═══ MOD：功能说明（僵尸 / 技能 / 游戏选项的长句）═══
-# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
+# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 缩写（ZM / MOD / AAT…）/ 其他专有名词一律不翻（不要为它们加条目）。（唯一例外 = 用户指定的 All-around Enhancement，见文末「MOD 名」节）
 girls' frontline: black ops iii 2.0=少女前线：黑色行动 3 2.0
 roamer time between rounds=游荡者回合间隔
 enable packapunch powerup=启用强化机道具
@@ -887,7 +924,7 @@ more=更多
 insane=疯狂
 
 # ═══ MOD：信息页、链接与 FAQ ═══
-# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
+# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 缩写（ZM / MOD / AAT…）/ 其他专有名词一律不翻（不要为它们加条目）。（唯一例外 = 用户指定的 All-around Enhancement，见文末「MOD 名」节）
 welcome commander!=欢迎回来，指挥官！
 useful links=实用链接
 homepage=主页
@@ -910,7 +947,7 @@ thank you for choosing girls' frontline: black ops iii 2.0, the character mod in
 lots of qol improvements and other additional features are added and fine-tuned for zombies gameplay. still, we highly recommend you take some time to play campaign if you haven't already, as it's another essential part of the total conversion mod.=为僵尸模式加入了大量体验优化和其他附加功能，并做了细致调整。不过，如果你还没玩过战役，我们依然建议花点时间体验一下 —— 它同样是这个全面转换 mod 的重要部分。
 
 # ═══ MOD：技能说明（含颜色码）═══
-# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 其他专有名词一律不翻（不要为它们加条目）。
+# ⚠️ 产品策略：mod 名 / 武器名 / 按键名 / 缩写（ZM / MOD / AAT…）/ 其他专有名词一律不翻（不要为它们加条目）。（唯一例外 = 用户指定的 All-around Enhancement，见文末「MOD 名」节）
 ^3stamin-up^7: raise your weapon after sprinting much quicker, fire and throw grenades while running, and unlimited sprint=^3Stamin-Up^7：冲刺后更快举枪，奔跑中可开火与投掷手雷，并且无限冲刺
 ^3double tap root beer^7: special weapon charges faster=^3Double Tap Root Beer^7：专家武器充能更快
 ^1widow's wine^7: gives phd flopper explosive resistance (only works when there is only one damage protection perk on the map)=^1Widow's Wine^7：让 PhD Flopper 获得爆炸抗性（仅当地图上只有一个伤害防护类技能时生效）
@@ -974,6 +1011,17 @@ a legendary shrine lost in an exotic jungle, where the undead lurk within a trea
 shi no numa in minecraft style. have fun!=Minecraft 风格的 Shi No Numa。祝你玩得开心！
 a minecraft theme map made by scriptwo !=由 Scriptwo 制作的 Minecraft 主题地图！
 
+# ═══ MOD：聊天播报（玩家名与武器名一律原样保留）═══
+# 纯文本版（面板里可能读它）与颜色码版（聊天真正渲染的那份）成对加入。
+*: i'm downed!=*：我倒了！
+*: kaboom!=*：轰！！！
+*: i got a new perk.=*：我买到一个新技能。
+*: i got the *.=*：我捡到了 *。
+*: i shared a * here.=*：我在这里分享了 *。
+
+# ═══ MOD：地图列表与兼容性说明（续 3）═══
+this map was entirely made by me, in terms of mapping. gameplay features, scripting and=就制图而言，这张地图完全由我一人完成。玩法内容、脚本与
+
 # ═══ 模板条目（动态数值：等级 / 转生 / 时长 / 命中次数）═══
 level *=等级 *
 prestige *=转生 *
@@ -997,6 +1045,32 @@ loaded mods  /  *=已载入模组 / *
 # ═══ 模板条目（动态数值）（续 2）═══
 ping: *=延迟：*
 
+# ═══ 模板条目（MOD 聊天播报：玩家名 / 武器名通配）═══
+^7^2*^7: ^7i'm downed!^7=^7^2*^7: ^7我倒了！^7
+^7^2*^7: ^7kaboom!^7=^7^2*^7: ^7轰！！！^7
+^7^2*^7: ^7i got a new perk.^7=^7^2*^7: ^7我买到一个新技能。^7
+^7^2*^7: ^7i got the^7 ^7*^7.^7=^7^2*^7: ^7我捡到了^7 ^7*^7。^7
+^7^2*^7: ^7i shared a^7 ^7*^7 ^7here^7.^7=^7^2*^7: ^7我在这里分享了^7 ^7*^7。^7
+
+# ═══ MOD：交互提示（按住按键 / 价格）═══
+hold ^3f^7 for tombstone (^22000^7)=按住 ^3F^7 购买 Tombstone（^22000^7）
+hold ^3f^7 for tombstone [cost: 2000]=按住 ^3F^7 购买 Tombstone [价格: 2000]
+hold ^3f^7 to rebuild barrier=按住 ^3F^7 重建路障
+hold ^3f^7 for stock option=按住 ^3F^7 购买 Stock Option
+hold ^3f^7 for ammo [cost: 250]=按住 ^3F^7 购买弹药 [价格: 250]
+press ^3f^7 to take the weapon=按 ^3F^7 拾取武器
+hold ^3f^7 to dispense gobblegum [cost: 1500]=按住 ^3F^7 获取泡泡糖 [价格: 1500]
+hold ^3f^7 to dispense gobblegum [cost: 0]=按住 ^3F^7 获取泡泡糖 [价格: 0]
+hold ^3f^7 for .420 ironhide [cost: 500]=按住 ^3F^7 购买 .420 Ironhide [价格: 500]
+hold ^3f^7 to clear debris [cost: 1000]=按住 ^3F^7 清理残骸 [价格: 1000]
+hold ^3f^7 to clear debris [cost: 1500]=按住 ^3F^7 清理残骸 [价格: 1500]
+hold ^3f^7 to use elevator [cost: 250]=按住 ^3F^7 使用电梯 [价格: 250]
+hold ^3f^7 to open door [cost: 750]=按住 ^3F^7 开门 [价格: 750]
+hold ^3f^7 for dmr 14 [cost: 500]=按住 ^3F^7 购买 DMR 14 [价格: 500]
+hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
+^3[{+reload}]^7 reload=^3[{+reload}]^7 装填
+^3r^7 reload=^3R^7 装填
+
 # ═══ 格式标记片段（^B 按键绑定 / $() 属性绑定 / [{...}] 令牌）═══
 [{primary}] to skip=[{primary}] 跳过
 spend ^bbutton_cod_point_icon^ for extra slots=花费 ^BBUTTON_COD_POINT_ICON^ 解锁额外栏位
@@ -1005,3 +1079,32 @@ spend ^bbutton_cod_point_icon^ for extra slots=花费 ^BBUTTON_COD_POINT_ICON^ �
 ^bmousewheelup^ to control scroll speed ^bmousewheeldown^=^BmouseWheelUp^ 控制滚动速度 ^BmouseWheelDown^
 $(lobbyroot.lobbylist.playercount) players ($(lobbyroot.lobbylist.maxplayers) max)=$(lobbyRoot.lobbyList.playerCount) 名玩家（上限 $(lobbyRoot.lobbyList.maxPlayers)）
 $(lobbyfriends.onlinecount) playing black ops 3=$(lobbyFriends.onlineCount) 人正在玩黑色行动 3
+
+# ═══ 地图名（mod 商店列表：名字前带 ^BBUTTON_PURCHASABLE_ICON^ 图标）═══
+^bbutton_purchasable_icon^ rise=^BBUTTON_PURCHASABLE_ICON^ 崛起
+^bbutton_purchasable_icon^ splash=^BBUTTON_PURCHASABLE_ICON^ 水上乐园
+^bbutton_purchasable_icon^ skyjacked=^BBUTTON_PURCHASABLE_ICON^ 空艇突袭
+^bbutton_purchasable_icon^ gauntlet=^BBUTTON_PURCHASABLE_ICON^ 试炼场
+^bbutton_purchasable_icon^ knockout=^BBUTTON_PURCHASABLE_ICON^ 击倒
+^bbutton_purchasable_icon^ rift=^BBUTTON_PURCHASABLE_ICON^ 裂谷
+^bbutton_purchasable_icon^ spire=^BBUTTON_PURCHASABLE_ICON^ 尖塔
+^bbutton_purchasable_icon^ verge=^BBUTTON_PURCHASABLE_ICON^ 临界点
+^bbutton_purchasable_icon^ rumble=^BBUTTON_PURCHASABLE_ICON^ 轰鸣
+^bbutton_purchasable_icon^ berserk=^BBUTTON_PURCHASABLE_ICON^ 狂战
+^bbutton_purchasable_icon^ cryogen=^BBUTTON_PURCHASABLE_ICON^ 低温实验室
+^bbutton_purchasable_icon^ empire=^BBUTTON_PURCHASABLE_ICON^ 帝国
+^bbutton_purchasable_icon^ citadel=^BBUTTON_PURCHASABLE_ICON^ 城堡
+^bbutton_purchasable_icon^ micro=^BBUTTON_PURCHASABLE_ICON^ 微观世界
+^bbutton_purchasable_icon^ outlaw=^BBUTTON_PURCHASABLE_ICON^ 亡命之徒
+^bbutton_purchasable_icon^ rupture=^BBUTTON_PURCHASABLE_ICON^ 崩裂
+
+# ═══ MOD 名（★用户指定例外：允许翻译）═══
+# ⚠️ 「mod 名一律不翻」策略的唯一例外 —— 用户 2026-09-16 拍板翻译这一个 mod 名。
+#    不要当错误删掉；也不要据此推广到其它 mod 名（mod 名属用户内容，形态无限）。
+# 规则：缩写保持原文（`ZM` = Zombies、`MOD`、`AAT` 等一律不翻）；
+#      颜色码 ^1/^3/^7 与 `[ + ]  ` 前缀跟名字**同属一段**（NextRun 只按 <0x20 真控制字节切段），必须连写。
+# 4 种形态 = 模组列表 2 种 + 工坊模组栈（带 `[ + ]  ` 添加前缀）2 种，实测各 11 / 11 / 3 / 3 次。
+^1[zm] ^3all-around enhancement v3.9.5 ^7lite=^1[ZM] ^3全方位增强 v3.9.5 ^7轻量
+^1[zm] ^3all-around enhancement v3.9.5=^1[ZM] ^3全方位增强 v3.9.5
+[ + ]  ^1[zm] ^3all-around enhancement v3.9.5 ^7lite=[ + ]  ^1[ZM] ^3全方位增强 v3.9.5 ^7轻量
+[ + ]  ^1[zm] ^3all-around enhancement v3.9.5=[ + ]  ^1[ZM] ^3全方位增强 v3.9.5
