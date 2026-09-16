@@ -196,6 +196,7 @@
   <ItemGroup>
     <ClCompile Include="src\Arxan.cpp" />
     <ClCompile Include="src\dict_update.cpp" />
+    <ClCompile Include="src\dxvk_download.cpp" />
     <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\gscu_hashing.cpp" />
     <ClCompile Include="src\Hooks.cpp" />

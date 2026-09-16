@@ -24,6 +24,7 @@
 #include "t7patch_log.h" // [LOCAL] the patch's single runtime log
 #include "GithubMark.h"  // [LOCAL] embedded alpha mask for the bottom-right link
 #include "dict_update.h" // [LOCAL] on-demand dictionary update (button-triggered)
+#include "dxvk_download.h" // [LOCAL] on-demand Vulkan backend download (button-triggered)
 #include "imgui/imgui.h"
 #include "imgui/backends/imgui_impl_dx11.h"
 #include "imgui/backends/imgui_impl_win32.h"
@@ -290,6 +291,15 @@ namespace
         const char* dictUpdatedFmt;
         const char* dictFailedFmt;
         const char* dictUpToDate;
+        // [LOCAL] Optional Vulkan backend (DXVK) - download + verify.  Same
+        // click-to-fetch discipline as the dictionary update above; nothing
+        // is fetched until the player presses the button.
+        const char* dxvkDownload;
+        const char* dxvkDownloadTip;
+        const char* dxvkDownloading;
+        const char* dxvkOk;
+        const char* dxvkFailedFmt;
+        const char* dxvkUpToDate;
         // [LOCAL] Page tabs + the page-2 card title.  The panel is a fixed
         // 395x440 with no scrollbar and the first page was full, so new
         // functionality goes onto a second page instead of squeezing this one.
@@ -323,6 +333,14 @@ namespace
         "已更新 %u 条",
         "更新失败：%s",
         "已是最新版",
+        "获取 Vulkan 后端",
+        "下载可选的 DXVK Vulkan 后端（约 13 MB）并校验哈希，文件存放于\n"
+        "T7Patch\\dxvk。把其中的 d3d11_backend.dll 与 dxgi.dll 一起移到游戏\n"
+        "目录即可启用，重启游戏后生效。",
+        "下载中…",
+        "已下载",
+        "下载失败：%s",
+        "已是最新版",
         "常规", "更多", "工具",
         "mod 汉化",
         "开启自动模组汉化（游戏必须为中文）",
@@ -350,6 +368,15 @@ namespace
         "Downloading...",
         "Updated %u entries",
         "Update failed: %s",
+        "Already up to date",
+        "Get Vulkan backend",
+        "Downloads the optional DXVK Vulkan backend (about 13 MB) and verifies\n"
+        "its signature hash.  Files are stored in T7Patch\\dxvk - move\n"
+        "d3d11_backend.dll and dxgi.dll into the game folder to enable it,\n"
+        "then restart the game.",
+        "Downloading...",
+        "Downloaded",
+        "Download failed: %s",
         "Already up to date",
         "General", "More", "Tools",
         "Mod translations",
@@ -634,6 +661,43 @@ namespace
                     // nothing failed, so it gets its own neutral line.
                     ImGui::SameLine();
                     ImGui::TextUnformatted(L()->dictUpToDate);
+                }
+
+                // [LOCAL] Optional Vulkan backend fetch - same click-to-fetch
+                // discipline as the dictionary update above, same state row
+                // shape.  Deliberately its own row: this is a rendering-backend
+                // feature, not a translation one, so the two must not read as
+                // one grouped action.  While it runs the size counter gives
+                // the only honest progress there is - a 13 MB payload over a
+                // proxy chain can take a while.
+                const dxvk_download::Status dx = dxvk_download::Get();
+                const bool dxDownloading = dx.state == dxvk_download::State::Running;
+                char dxBtn[96]{};
+                snprintf(dxBtn, sizeof(dxBtn), "%s##dxvkdownload", L()->dxvkDownload);
+                if (ImGui::Button(dxBtn, ImVec2(0.0f, 0.0f)) && !dxDownloading)
+                    dxvk_download::Start();
+                ImGui::SetItemTooltip("%s", L()->dxvkDownloadTip);
+
+                if (dxDownloading)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text("%s %u KiB", L()->dxvkDownloading,
+                        static_cast<unsigned>(dx.downloadedKiB));
+                }
+                else if (dx.state == dxvk_download::State::Ok)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dxvkOk);
+                }
+                else if (dx.state == dxvk_download::State::Failed)
+                {
+                    ImGui::SameLine();
+                    ImGui::Text(L()->dxvkFailedFmt, dx.message);
+                }
+                else if (dx.state == dxvk_download::State::UpToDate)
+                {
+                    ImGui::SameLine();
+                    ImGui::TextUnformatted(L()->dxvkUpToDate);
                 }
             }
             EndCard();
