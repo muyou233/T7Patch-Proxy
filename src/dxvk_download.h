@@ -59,4 +59,34 @@ namespace dxvk_download
 
     // Snapshot for the UI.  Cheap enough to call every frame.
     Status Get();
+
+    // ---- enabling the backend --------------------------------------------
+    //
+    // The toggle the player flips is the pair's LOCATION, not a config value:
+    // both files parked in T7Patch\dxvk means "downloaded, off", both in the
+    // game folder means "on at next launch".  (The game imports d3d11/dxgi
+    // statically, so nothing can switch at runtime and the files must move
+    // together - see proxy/Proxy.cpp for the gate that enforces the same
+    // rule from the loading side.)
+    enum class InstallState
+    {
+        Absent,   // no complete pair anywhere - the toggle is disabled
+        Parked,   // both in T7Patch\dxvk - downloaded, not enabled
+        Enabled,  // both in the game folder - active from the next launch
+        Mixed     // split across the two - must not happen; re-download
+    };
+
+    // Presence-only check: two GetFileAttributesW calls, no hashing.  The UI
+    // polls this every frame, which is exactly why integrity is enforced at
+    // download time (a file that arrived is a file that verified) and never
+    // re-checked here.
+    InstallState Query();
+
+    // Move the pair park->game (Enable) or game->park (Disable).  Same-volume
+    // renames, so both return in milliseconds and are safe to call inside the
+    // ImGui frame.  false means a file was missing, locked, or the target
+    // already existed - Query() keeps reporting the old state, and the log
+    // says which move failed.
+    bool Enable();
+    bool Disable();
 }

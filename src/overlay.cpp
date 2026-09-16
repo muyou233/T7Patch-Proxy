@@ -300,6 +300,15 @@ namespace
         const char* dxvkOk;
         const char* dxvkFailedFmt;
         const char* dxvkUpToDate;
+        // [LOCAL] The enable toggle plus its four state lines.  The toggle is
+        // disabled until a verified pair exists, and flipping it MOVES the two
+        // files between T7Patch\dxvk and the game folder - the pair's location
+        // is the switch, not a config value.
+        // [LOCAL] The enable toggle.  Grey until a verified pair exists; the
+        // checkbox IS the switch - checked once the pair sits in the game
+        // folder.  No extra state text: a row that reads like the translation
+        // row needs no narration.
+        const char* dxvkToggle;
         // [LOCAL] Page tabs + the page-2 card title.  The panel is a fixed
         // 395x440 with no scrollbar and the first page was full, so new
         // functionality goes onto a second page instead of squeezing this one.
@@ -333,14 +342,14 @@ namespace
         "已更新 %u 条",
         "更新失败：%s",
         "已是最新版",
-        "获取 Vulkan 后端",
-        "下载可选的 DXVK Vulkan 后端（约 13 MB）并校验哈希，文件存放于\n"
-        "T7Patch\\dxvk。把其中的 d3d11_backend.dll 与 dxgi.dll 一起移到游戏\n"
-        "目录即可启用，重启游戏后生效。",
+        "获取DXVK",
+        "约13MB，改用Vulkan渲染，也许能提升流畅度（因机而异）。\n"
+        "重启生效。",
         "下载中…",
         "已下载",
         "下载失败：%s",
         "已是最新版",
+        "启用 DXVK",
         "常规", "更多", "工具",
         "mod 汉化",
         "开启自动模组汉化（游戏必须为中文）",
@@ -369,15 +378,14 @@ namespace
         "Updated %u entries",
         "Update failed: %s",
         "Already up to date",
-        "Get Vulkan backend",
-        "Downloads the optional DXVK Vulkan backend (about 13 MB) and verifies\n"
-        "its signature hash.  Files are stored in T7Patch\\dxvk - move\n"
-        "d3d11_backend.dll and dxgi.dll into the game folder to enable it,\n"
-        "then restart the game.",
+        "Get DXVK",
+        "~13MB, switches to Vulkan rendering - may improve smoothness (varies by machine).\n"
+        "Restart to apply.",
         "Downloading...",
         "Downloaded",
         "Download failed: %s",
         "Already up to date",
+        "Enable DXVK",
         "General", "More", "Tools",
         "Mod translations",
         "Enables automatic mod translation (the game must be set to Chinese).",
@@ -663,15 +671,33 @@ namespace
                     ImGui::TextUnformatted(L()->dictUpToDate);
                 }
 
-                // [LOCAL] Optional Vulkan backend fetch - same click-to-fetch
-                // discipline as the dictionary update above, same state row
-                // shape.  Deliberately its own row: this is a rendering-backend
-                // feature, not a translation one, so the two must not read as
-                // one grouped action.  While it runs the size counter gives
-                // the only honest progress there is - a 13 MB payload over a
-                // proxy chain can take a while.
+                // [LOCAL] Same row shape as the translation row above: the
+                // custom checkbox, then the fetch button, then a short state
+                // word.  The checkbox IS the switch - grey until a verified
+                // pair exists somewhere, checked once the pair sits in the
+                // game folder.  Flipping it renames the two files between the
+                // store and the game folder (same-volume renames, return in
+                // microseconds); takes effect on the next launch, because the
+                // game binds d3d11/dxgi statically at process start.  No state
+                // prose beyond the running word: a row that matches its
+                // neighbour needs no narration.
                 const dxvk_download::Status dx = dxvk_download::Get();
                 const bool dxDownloading = dx.state == dxvk_download::State::Running;
+                const dxvk_download::InstallState inst = dxvk_download::Query();
+                const bool dxAvailable = inst != dxvk_download::InstallState::Absent;
+                bool dxOn = inst == dxvk_download::InstallState::Enabled;
+
+                ImGui::BeginDisabled(!dxAvailable);
+                if (SolidCheckbox(L()->dxvkToggle, &dxOn) && dxAvailable)
+                {
+                    if (dxOn && inst == dxvk_download::InstallState::Parked)
+                        dxvk_download::Enable();
+                    else if (!dxOn)
+                        dxvk_download::Disable();
+                }
+                ImGui::EndDisabled();
+
+                ImGui::SameLine();
                 char dxBtn[96]{};
                 snprintf(dxBtn, sizeof(dxBtn), "%s##dxvkdownload", L()->dxvkDownload);
                 if (ImGui::Button(dxBtn, ImVec2(0.0f, 0.0f)) && !dxDownloading)

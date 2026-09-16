@@ -181,6 +181,56 @@ namespace dxvk_download
                 gameDir, name) > 0;
         }
 
+        // ---- install state ------------------------------------------------
+
+        // Full path of one payload file, in the game folder or in the store.
+        bool PathFor(const char* name, bool inGame, wchar_t* out, size_t outChars)
+        {
+            wchar_t gameDir[MAX_PATH] = {};
+            const DWORD len = GetModuleFileNameW(nullptr, gameDir, MAX_PATH);
+            if (len == 0 || len >= MAX_PATH)
+                return false;
+            wchar_t* slash = wcsrchr(gameDir, L'\\');
+            if (!slash)
+                return false;
+            *(slash + 1) = L'\0';
+            return swprintf_s(out, outChars,
+                inGame ? L"%s%hs" : L"%sT7Patch\\dxvk\\%hs", gameDir, name) > 0;
+        }
+
+        bool PairPresent(bool inGame)
+        {
+            wchar_t a[MAX_PATH * 2] = {};
+            wchar_t b[MAX_PATH * 2] = {};
+            return PathFor("d3d11_backend.dll", inGame, a, _countof(a))
+                && GetFileAttributesW(a) != INVALID_FILE_ATTRIBUTES
+                && PathFor("dxgi.dll", inGame, b, _countof(b))
+                && GetFileAttributesW(b) != INVALID_FILE_ATTRIBUTES;
+        }
+
+        // One half of the pair, park->game (enable) or game->park (disable).
+        bool MoveOne(const char* name, bool toGame)
+        {
+            wchar_t from[MAX_PATH * 2] = {};
+            wchar_t to[MAX_PATH * 2] = {};
+            if (!PathFor(name, !toGame, from, _countof(from))
+                || !PathFor(name, toGame, to, _countof(to)))
+            {
+                return false;
+            }
+            // MoveFile refuses to overwrite - exactly what we want: an
+            // unexpected file at the destination must stop us, not vanish.
+            if (!MoveFileW(from, to))
+            {
+                char msg[256] = {};
+                sprintf_s(msg, "dxvk install: cannot move %s (%lu)",
+                    name, static_cast<unsigned long>(GetLastError()));
+                Logf("%s", msg);
+                return false;
+            }
+            return true;
+        }
+
         // One bounded HTTPS GET.  Every wait has a timeout, so a black-holed
         // connection cannot leave the worker (and the "downloading" state)
         // stuck forever - same semantics the dictionary update settled on:
@@ -301,6 +351,16 @@ namespace dxvk_download
 
         void Worker()
         {
+            // A fresh install has no T7Patch\dxvk - the first download is what
+            // fills it, the folder is NOT part of the package.  Create it
+            // before anything else; the call is a harmless no-op when it is
+            // already there.  (First real-world run pulled 7.5 MB from both
+            // mirrors and then died on fopen because the folder was missing -
+            // the network was never the problem, the assumption was.)
+            wchar_t storeDir[MAX_PATH * 2] = {};
+            if (StorePath("", storeDir, _countof(storeDir)))
+                CreateDirectoryW(storeDir, nullptr);
+
             SetMessage("checking local files...");
 
             for (const File& file : kFiles)
@@ -469,5 +529,54 @@ namespace dxvk_download
         std::lock_guard<std::mutex> lock(g_messageMutex);
         strncpy_s(status.message, g_message, _TRUNCATE);
         return status;
+    }
+
+    InstallState Query()
+    {
+        const bool inGame = PairPresent(true);
+        const bool parked = PairPresent(false);
+        if (inGame && parked)
+            return InstallState::Mixed;
+        if (inGame)
+            return InstallState::Enabled;
+        if (parked)
+            return InstallState::Parked;
+        return InstallState::Absent;
+    }
+
+    bool Enable()
+    {
+        if (PairPresent(true))
+            return true; // already on - idempotent, the checkbox just agrees
+        static const char* names[] = { "d3d11_backend.dll", "dxgi.dll" };
+        for (const char* name : names)
+        {
+            if (!MoveOne(name, true))
+            {
+                Logf("dxvk install: enabling aborted at %s", name);
+                return false;
+            }
+        }
+        Logf("dxvk install: enabled - both files moved into the game folder, "
+            "takes effect on the next launch");
+        return true;
+    }
+
+    bool Disable()
+    {
+        if (!PairPresent(true))
+            return true; // already off
+        static const char* names[] = { "d3d11_backend.dll", "dxgi.dll" };
+        for (const char* name : names)
+        {
+            if (!MoveOne(name, false))
+            {
+                Logf("dxvk install: disabling aborted at %s", name);
+                return false;
+            }
+        }
+        Logf("dxvk install: disabled - both files moved back to T7Patch\\dxvk, "
+            "takes effect on the next launch");
+        return true;
     }
 }
