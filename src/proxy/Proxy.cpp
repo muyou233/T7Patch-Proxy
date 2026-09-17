@@ -533,6 +533,26 @@ namespace
             waited += 50;
         }
 
+        // [LOCAL] Fail closed when the table never appeared.  This is not a
+        // "carry on without it" situation: Protection::install() reads the very
+        // same slot a few lines later and writes through the pointer it finds
+        // there (*(INT64*)(REBASE(0x1686ED20)) and then *(DWORD*)(ptrDvar +
+        // 0x18) = 0), so a null table here is a guaranteed access violation
+        // there.  Doing nothing - and saying why, on screen and in the log -
+        // beats crashing the game with no explanation.
+        if (*reinterpret_cast<volatile INT64*>(REBASE(kDvarTableRva)) == 0)
+        {
+            char dvarMsg[192] = { 0 };
+            sprintf_s(dvarMsg, "proxy: the engine's dvar table did not appear "
+                "within %llu ms - T7Patch not applied",
+                static_cast<unsigned long long>(kDvarWaitTimeoutMs));
+            ProxyLog(dvarMsg);
+            t7patch_warn_startup_failure("T7 Patch could not start: the game's "
+                "engine tables were not ready in time.\n"
+                "The patch was not applied - please launch the game again.");
+            return 0;
+        }
+
         char msg[160] = { 0 };
         sprintf_s(msg, "proxy: dvar table ready after %llu ms, settling %u ms",
             waited, kSettleMs);

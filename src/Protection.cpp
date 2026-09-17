@@ -485,30 +485,51 @@ struct download_progress
 };
 
 std::unordered_map<INT32, download_progress> downloadProgress;
+// [LOCAL] downloadProgress gets the same guard friends_set and the two DLC
+// caches already have.  This slot is reached from whichever threads Steam
+// drives the interface on, and every path used to touch the map twice
+// unsynchronised - including operator[], whose insertion can rehash the whole
+// table underneath a concurrent reader.
+//
+// The mutex is deliberately NOT held across the call into the real interface:
+// that is an engine-side call, and holding a lock over one is the thing the
+// rest of this file never does.
+std::mutex downloadProgress_mutex;
+
 void Protection::GetDlcDownloadProgress(INT64 a, INT32 b, INT64* c, INT64* d)
 {
-    auto now = GetTickCount64();
+    const auto now = GetTickCount64();
 
-    if (downloadProgress.find(b) != downloadProgress.end())
     {
-        if (now >= downloadProgress[b].next)
+        std::lock_guard<std::mutex> lock(downloadProgress_mutex);
+
+        auto it = downloadProgress.find(b);
+        if (it == downloadProgress.end())
         {
-            downloadProgress[b].next = GetTickCount64() + (60 * 5 * 1000);
-            ((void(__fastcall*)(INT64, INT32, INT64*, INT64*))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_GET_DLC_DOWNLOAD_PROGRESS))(a, b, c, d);
-            downloadProgress[b].a = *c;
-            downloadProgress[b].b = *d;
+            it = downloadProgress.emplace(b, download_progress()).first;
+        }
+        else if (now < it->second.next)
+        {
+            // Cached: hand back what the last real query returned.
+            *c = it->second.a;
+            *d = it->second.b;
             return;
         }
-        *c = downloadProgress[b].a;
-        *d = downloadProgress[b].b;
-        return;
+
+        it->second.next = now + (60 * 5 * 1000);
     }
 
-    downloadProgress[b] = download_progress();
-    downloadProgress[b].next = GetTickCount64() + (60 * 5 * 1000);
     ((void(__fastcall*)(INT64, INT32, INT64*, INT64*))GetOriginalSteamPtr(STEAMAPI_INTERFACE, STEAMAPI_INTERFACE_GET_DLC_DOWNLOAD_PROGRESS))(a, b, c, d);
-    downloadProgress[b].a = *c;
-    downloadProgress[b].b = *d;
+
+    {
+        std::lock_guard<std::mutex> lock(downloadProgress_mutex);
+        auto it = downloadProgress.find(b);
+        if (it != downloadProgress.end())
+        {
+            it->second.a = *c;
+            it->second.b = *d;
+        }
+    }
 }
 
 __int32 Protection::GetLobbyChatEntry(INT64 api, INT64 csteamidlobby, INT64 chatid, INT64 psteamuserid, INT64 pvdata, INT64 cubdata, INT64 chatentrytype)
@@ -693,15 +714,24 @@ INT64 Protection::GetOriginalSteamPtr(__int64 hLibrary, int vtIndex)
 
 bool fs_exists(const char* filename)
 {
-    if (!std::filesystem::exists(filename))
+    // [LOCAL] GetFileAttributesA answers this on its own, and unlike
+    // std::filesystem::exists() it cannot throw.  The exists() call that used
+    // to sit first here was redundant AND dangerous: that overload raises
+    // filesystem_error on any OS-level failure (a deny-ACL, an AV scanner
+    // holding the file, the file disappearing between the two calls), and this
+    // function runs from the MainThread's once-a-second poll with no handler
+    // above it - the throw would leave the thread function and terminate the
+    // game.  Behaviour is unchanged: the attribute call below already decided
+    // every case the exists() test could return true for.
+    const DWORD attr = GetFileAttributesA(filename);
+    if (attr != INVALID_FILE_ATTRIBUTES)
     {
-        return false;
+        return true;
     }
-    if (INVALID_FILE_ATTRIBUTES == GetFileAttributesA(filename) && GetLastError() == ERROR_FILE_NOT_FOUND)
-    {
-        return false;
-    }
-    return true;
+    // Any other error (access denied, a device path, a network hiccup) still
+    // means "treat it as present", exactly as the old second branch did - a
+    // config we cannot look at must not be mistaken for a first run.
+    return GetLastError() != ERROR_FILE_NOT_FOUND;
 }
 
 // [LOCAL] THE config lock.  `user_config` is reached from three threads and
@@ -811,6 +841,13 @@ struct patch_config
     unsigned keys_seen;
     bool exists;
     std::filesystem::file_time_type modified;
+    // [LOCAL] Set when the last loadfrom() found the file but could not OPEN
+    // it.  Through keys_seen that case looks exactly like "written by an older
+    // build" - both leave the mask short of K_ALL - and load_settings_initial()
+    // answers the latter by rewriting the file, which after a failed READ would
+    // replace whatever the player had with this build's defaults.  A property
+    // of the last read rather than a setting, so it stays out of `values`.
+    bool read_failed;
 
     // [LOCAL] A flat copy of everything a config file can carry.  loadfrom()
     // parses into one of these and publishes it in a single step, so a reader
@@ -852,6 +889,7 @@ struct patch_config
         keys_seen = 0;      // nothing read from a file yet
         exists = false;
         modified = std::filesystem::file_time_type();
+        read_failed = false;
         // [LOCAL] Was: strcat_s(playername, "Unknown Soldier");
         // An empty playername now means "do not override the name the game
         // already has", so start with no custom name at all.  Set
@@ -905,7 +943,20 @@ struct patch_config
         }
 
         exists = true;
-        auto time = std::filesystem::last_write_time(path);
+
+        // [LOCAL] error_code overload on purpose: the throwing one raises
+        // filesystem_error on an OS-level failure, and this function is reached
+        // from the MainThread's once-a-second poll (update_watcher_time) as
+        // well as from saveto()/loadfrom(), with nothing above any of those to
+        // catch it.  On an error the previous stamp is kept, so the tick
+        // reports "unchanged" instead of reloading a config it cannot read.
+        std::error_code ec;
+        const std::filesystem::file_time_type time =
+            std::filesystem::last_write_time(path, ec);
+        if (ec)
+        {
+            return did_exist_before != exists;
+        }
 
         bool was_same_time = modified == time;
         modified = time;
@@ -1007,6 +1058,21 @@ struct patch_config
 
         outfile.close();
 
+        // [LOCAL] close() is where the buffer is flushed, and a failed flush
+        // (a full disk, a write interrupted by another program) used to be
+        // invisible: the truncated file was stamped as current, keys_seen was
+        // raised to K_ALL and the caller was told "true".  Report it instead.
+        // The timestamp is stamped first so the watcher does not immediately
+        // reload the half-written file being left behind - the in-memory
+        // settings stay authoritative for this session.
+        if (!outfile)
+        {
+            update_watcher_time_locked(path);
+            overlay::DebugLog("config file could not be written completely - "
+                "the settings stay in memory for this session");
+            return false;
+        }
+
         // [LOCAL] The file on disk now carries every key this build knows, so
         // record that even though only a handful of bits may have been set when
         // it was read.  Without this a same-session check would see the stale
@@ -1029,6 +1095,12 @@ struct patch_config
         if (!infile.is_open())
         {
             std::lock_guard<std::mutex> lock(g_config_mutex);
+            // [LOCAL] A read FAILURE, not an old format - see the note on
+            // read_failed.  keys_seen stays short of K_ALL either way, and
+            // this flag is the only thing that tells the two apart, so that
+            // load_settings_initial() does not answer a locked file by
+            // rewriting it with this build's defaults.
+            read_failed = true;
             update_watcher_time_locked(path);
             return;
         }
@@ -1225,6 +1297,7 @@ struct patch_config
         // new playername next to the previous password.
         std::lock_guard<std::mutex> lock(g_config_mutex);
         publish_locked(v);
+        read_failed = false; // the file was opened and parsed after all
         update_watcher_time_locked(path);
     }
 };
@@ -1641,14 +1714,21 @@ void t7patch_config_save()
     // note on g_config_apply_pending.  MainThread picks the flag up on its next
     // 1 s tick, which is the "applies within ~1 s" the config template
     // promises.
-    user_config.saveto(PATCH_CONFIG_LOCATION);
+    const bool written = user_config.saveto(PATCH_CONFIG_LOCATION);
     g_config_apply_pending = true;
 
     // [LOCAL] One line per write, so "I pressed Save and nothing happened" can
     // be settled from the log: this line means the file was written, and its
     // absence means the click never reached the handler.  Saves are
     // click-driven, so this cannot flood the log.
-    overlay::DebugLog("config written to disk");
+    //
+    // [LOCAL] The result is now reported rather than assumed.  saveto() also
+    // fails when the flush came up short (see the note there), and claiming
+    // "written to disk" right after that failure is the kind of log line that
+    // sends a bug hunt in the wrong direction.  The apply hand-off still
+    // happens either way - the settings are live for this session regardless.
+    overlay::DebugLog(written ? "config written to disk"
+                              : "config could not be written to disk");
 }
 
 // [LOCAL] Field-level accessors for the overlay menu (patch_config lives in
@@ -2086,12 +2166,25 @@ void load_settings_initial()
         // the translation switches.  The owner's call, 2026-09-16: "if the file
         // does not match, just generate a new one and overwrite the old".
         unsigned missingKeys = 0;
+        bool readFailed = false;
         {
             std::lock_guard<std::mutex> lock(g_config_mutex);
             missingKeys = patch_config::K_ALL & ~user_config.keys_seen;
+            readFailed = user_config.read_failed;
         }
 
-        if (missingKeys != 0)
+        if (missingKeys != 0 && readFailed)
+        {
+            // [LOCAL] The file is there but could not be opened (an AV scanner
+            // holding it, a deny-ACL, a syncing drive).  Rewriting now would
+            // wipe the player's settings with this build's defaults - and
+            // saveto() would then mark the file complete, so nothing would
+            // ever put them back.  Leave the file alone: for this session the
+            // values in force are the built-in defaults, exactly as before.
+            overlay::DebugLog("config file is present but could not be read - "
+                "left untouched (locked by another program?)");
+        }
+        else if (missingKeys != 0)
         {
             int missingCount = 0;
             for (unsigned bit = 1; bit <= patch_config::K_ALL; bit <<= 1)
@@ -2162,6 +2255,26 @@ __int64 old_IsProcessorFeaturePresent = 0;
 
 void Protection::install()
 {
+    // [LOCAL] One-shot gate.  install() has two entry points - the proxy's
+    // PatchWorker (CAS-guarded in Proxy.cpp) and the exported
+    // zbr_run_gamemode_lui, which has no guard at all - and a second pass is
+    // destructive rather than merely redundant:
+    //   * IHOOK_INSTALL(IsProcessorFeaturePresent, ...) assigns
+    //     oIsProcessorFeaturePresent from detour_iat_ptr(), which returns 0
+    //     when the slot already points at our hook (Protection.cpp find()/
+    //     detour_iat_ptr, "already ours" branch).  The live hook would then
+    //     call a NULL original pointer.
+    //   * the injectorless branch at the end of this function starts a second
+    //     MainThread, i.e. two 1 Hz watchers applying settings and running the
+    //     Arxan bypass maintenance.
+    // Nothing in here is idempotent, so ignoring the repeat IS the fix.
+    static std::atomic<bool> installDone{ false };
+    if (installDone.exchange(true))
+    {
+        overlay::DebugLog("install() already ran in this process - ignoring the repeat");
+        return;
+    }
+
     LobbyMsgRW_PackageInt = (tLobbyMsgRW_PackageInt)PTR_LobbyMsgRW_PackageInt;
     LobbyMsgRW_PackageUChar = (tLobbyMsgRW_PackageUChar)PTR_LobbyMsgRW_PackageUChar;
     LobbyMsgRW_PackageString = (tLobbyMsgRW_PackageString)PTR_LobbyMsgRW_PackageString;

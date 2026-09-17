@@ -209,6 +209,23 @@ namespace dxvk_download
         }
 
         // One half of the pair, park->game (enable) or game->park (disable).
+        //
+        // [LOCAL] The two directions treat a copy already sitting at the
+        // destination DIFFERENTLY, and that is deliberate:
+        //
+        //   * enable (destination = the game folder) keeps refusing to
+        //     overwrite.  Something else may have put a DXVK there - PatchOpsIII
+        //     and dxvk_chain.py both write these two file names - and silently
+        //     replacing it would hand the player a mixture nobody chose.  The
+        //     move stops there, the log names the file it stopped on, and
+        //     nothing is lost.
+        //   * disable (destination = T7Patch\dxvk) overwrites.  A copy sitting
+        //     there can only be our own redundant one - that is what "the pair
+        //     is in both places" means - and the game folder's copy is the
+        //     authoritative one: DXVK loads THAT file, and the same rule already
+        //     governs the d3dcompiler_46 rename.  Refusing here left the toggle
+        //     permanently stuck, because turning the backend off works by
+        //     moving these very files back.
         bool MoveOne(const char* name, bool toGame)
         {
             wchar_t from[MAX_PATH * 2] = {};
@@ -218,14 +235,68 @@ namespace dxvk_download
             {
                 return false;
             }
-            // MoveFile refuses to overwrite - exactly what we want: an
-            // unexpected file at the destination must stop us, not vanish.
-            if (!MoveFileW(from, to))
+
+            // Logged explicitly: replacing the parked copy is the only place
+            // this feature throws a file away, and "why did my back-up copy
+            // change" deserves to be answerable from the log.
+            if (!toGame && GetFileAttributesW(to) != INVALID_FILE_ATTRIBUTES)
+            {
+                Logf("dxvk install: %s also existed in T7Patch\\dxvk - the game "
+                    "folder's copy is authoritative, the parked one is replaced",
+                    name);
+            }
+
+            // MOVEFILE_REPLACE_EXISTING only in the disable direction; 0 leaves
+            // MoveFileExW behaving exactly like the MoveFileW it replaces.
+            const DWORD flags = toGame ? 0 : MOVEFILE_REPLACE_EXISTING;
+            if (!MoveFileExW(from, to, flags))
             {
                 char msg[256] = {};
                 sprintf_s(msg, "dxvk install: cannot move %s (%lu)",
                     name, static_cast<unsigned long>(GetLastError()));
                 Logf("%s", msg);
+                return false;
+            }
+            return true;
+        }
+
+        // Moves the whole pair, and puts back whatever already moved when one
+        // of the two fails.
+        //
+        // Why this matters: the half-moved state is the one state nothing else
+        // recovers from.  One file ends up in the game folder and the other in
+        // the store, so PairPresent() is false on both sides - Query() reports
+        // Absent (the toggle greys out and claims DXVK was never installed),
+        // and the next launch can only REPORT the mixture: a translation-layer
+        // dxgi with no backend beside it raises the player-visible notice.
+        // Putting the first file back turns all of that into "the switch did
+        // nothing and the log says why", which is what the player expects.
+        //
+        // The rollback can itself fail - for the very reason the move did.
+        // Then the log says so and the start-up notice is still the net.
+        bool MovePair(bool toGame)
+        {
+            static const char* names[] = { "d3d11_backend.dll", "dxgi.dll" };
+            const int count = static_cast<int>(_countof(names));
+
+            int moved = 0;
+            for (; moved < count; ++moved)
+            {
+                if (MoveOne(names[moved], toGame))
+                    continue;
+
+                Logf("dxvk install: %s aborted at %s - putting back what had "
+                    "already moved", toGame ? "enabling" : "disabling",
+                    names[moved]);
+
+                for (int i = moved - 1; i >= 0; --i)
+                {
+                    if (!MoveOne(names[i], !toGame))
+                    {
+                        Logf("dxvk install: could not put %s back - the pair is "
+                            "half moved (see the start-up notice)", names[i]);
+                    }
+                }
                 return false;
             }
             return true;
@@ -362,6 +433,35 @@ namespace dxvk_download
                 CreateDirectoryW(storeDir, nullptr);
 
             SetMessage("checking local files...");
+
+            // [LOCAL] The case the per-file check below cannot see: the pair is
+            // already INSTALLED in the game folder.
+            //
+            // Enabling MOVES both files out of T7Patch\dxvk into the game folder
+            // (Enable/MoveOne use MoveFileW, not a copy), so once DXVK is on the
+            // store is empty - and every file below then looks missing.  This
+            // worker used to re-download all 12.9 MB in that situation and put
+            // the pair back into the store, leaving it in BOTH places: exactly
+            // the Mixed state Query() reports, which the menu draws as an
+            // unticked toggle while DXVK is in fact enabled, and which
+            // Disable() then refuses to undo because its move target exists.
+            //
+            // The authority here is the state the toggle itself draws, not a
+            // second look into the game folder: one question, one answer, so the
+            // button and the download cannot disagree about where the pair is.
+            // Both non-Absent states with the pair in the game folder count -
+            // Enabled (only there) and Mixed (there and in the store, which is
+            // how a machine broken by an older build reports itself).
+            const InstallState inst = Query();
+            if (inst == InstallState::Enabled || inst == InstallState::Mixed)
+            {
+                Logf("dxvk download: the pair is already in the game folder "
+                    "(state %d) - nothing to fetch", static_cast<int>(inst));
+                SetMessage("already downloaded");
+                g_state.store(static_cast<int>(State::Ok));
+                g_lastRunMs.store(GetTickCount64());
+                return;
+            }
 
             for (const File& file : kFiles)
             {
@@ -677,15 +777,8 @@ namespace dxvk_download
     {
         if (PairPresent(true))
             return true; // already on - idempotent, the checkbox just agrees
-        static const char* names[] = { "d3d11_backend.dll", "dxgi.dll" };
-        for (const char* name : names)
-        {
-            if (!MoveOne(name, true))
-            {
-                Logf("dxvk install: enabling aborted at %s", name);
-                return false;
-            }
-        }
+        if (!MovePair(true))
+            return false;
         Logf("dxvk install: enabled - both files moved into the game folder, "
             "takes effect on the next launch");
         return true;
@@ -695,15 +788,8 @@ namespace dxvk_download
     {
         if (!PairPresent(true))
             return true; // already off
-        static const char* names[] = { "d3d11_backend.dll", "dxgi.dll" };
-        for (const char* name : names)
-        {
-            if (!MoveOne(name, false))
-            {
-                Logf("dxvk install: disabling aborted at %s", name);
-                return false;
-            }
-        }
+        if (!MovePair(false))
+            return false;
         Logf("dxvk install: disabled - both files moved back to T7Patch\\dxvk, "
             "takes effect on the next launch");
         return true;

@@ -663,7 +663,13 @@ namespace
                 const bool dxDownloading = dx.state == dxvk_download::State::Running;
                 const dxvk_download::InstallState inst = dxvk_download::Query();
                 const bool dxAvailable = inst != dxvk_download::InstallState::Absent;
-                bool dxOn = inst == dxvk_download::InstallState::Enabled;
+                // [LOCAL] "Enabled" means the pair is in the game folder, and
+                // that is equally true of Mixed (the pair in BOTH places - a
+                // machine an older build left behind, since the download no
+                // longer produces it).  Drawing Mixed as unticked told the
+                // player DXVK was off while it in fact loaded at every launch.
+                bool dxOn = inst == dxvk_download::InstallState::Enabled
+                    || inst == dxvk_download::InstallState::Mixed;
 
                 ImGui::BeginDisabled(!dxAvailable);
                 if (SolidCheckbox(L()->dxvkToggle, &dxOn) && dxAvailable)
@@ -951,7 +957,19 @@ namespace
         }
         EndCard();
 
-        BeginCard(L()->config);
+        // [LOCAL] The last card of the page FILLS it, exactly like the DXVK and
+        // tools pages already do.  Page 1 used to rely on its three auto-sized
+        // cards happening to add up to the panel height - which is precisely
+        // why it looked tidy AND why the next row added here would either leave
+        // a gap or be clipped outright: the panel is a fixed 395x440 with no
+        // scrollbar, so overflow has nowhere to go.  Filling removes the row
+        // budget from this card (adding a row moves its content, not its
+        // border) and levels the bottom edge of all three pages, which is what
+        // "the gap at the bottom differs between pages" was.
+        //
+        // The height is measured AFTER the two cards above, so it needs no
+        // constant of its own.
+        BeginCardSized(L()->config, ImGui::GetContentRegionAvail().y);
         {
             // Language: two small buttons, the active one drawn in accent.
             ImGui::TextUnformatted(L()->language);
@@ -1210,7 +1228,19 @@ namespace
                 }
             }
             if (!fontLoaded)
+            {
+                // [LOCAL] This machine has none of the CJK fonts above.  The
+                // default font carries ASCII glyphs only, while menu_lang
+                // defaults to Chinese - so the panel would come up as a screen
+                // of boxes with nothing in the log to explain it.  Say so, and
+                // fall back to the English text table so it stays usable (the
+                // setting is saved, so the conf agrees with what is on screen).
+                overlay_log("font: no CJK system font found (tried MiSans, "
+                    "DengXian, YaHei, SimHei) - menu switched to English");
                 io.Fonts->AddFontDefault();
+                t7patch_cfg_set_menu_lang(0);
+                t7patch_config_save();
+            }
         }
 
         if (!ImGui_ImplWin32_Init(g_hwnd))
