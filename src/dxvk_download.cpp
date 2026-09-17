@@ -687,6 +687,18 @@ namespace dxvk_download
             (end == std::string::npos) ? std::string::npos : end - at);
     }
 
+    // The six names, in the order the page draws the ticks and the order they
+    // are written into dxvk.hud.
+    struct HudName { unsigned bit; const char* name; };
+    const HudName kHudNames[] = {
+        { HUD_FPS,        "fps" },
+        { HUD_FRAMETIMES, "frametimes" },
+        { HUD_GPULOAD,    "gpuload" },
+        { HUD_MEMORY,     "memory" },
+        { HUD_COMPILER,   "compiler" },
+        { HUD_DEVINFO,    "devinfo" },
+    };
+
     void EnsureConfLoaded()
     {
         if (g_confLoaded)
@@ -695,10 +707,18 @@ namespace dxvk_download
 
         std::string body;
         if (!ReadConfFile(body) || body.empty())
-            return; // defaults: hud on, uncapped, tearFree Auto
+            return; // defaults: hud off, uncapped, tearFree Auto
 
+        // One substring test per name, on the comma list we wrote ourselves
+        // (and "anything not listed runs at the default" is exactly right
+        // here).  The fixed trio the earlier builds wrote - fps,frametimes,
+        // gpuload - resolves to those same three ticks, so an upgrade keeps
+        // the player's HUD instead of silently turning it off.
         const std::string hud = ConfValue(body, "dxvk.hud=");
-        g_confCache.hud = !hud.empty();
+        g_confCache.hud = 0;
+        for (const HudName& n : kHudNames)
+            if (hud.find(n.name) != std::string::npos)
+                g_confCache.hud |= n.bit;
         const std::string fps = ConfValue(body, "dxgi.maxFrameRate=");
         if (!fps.empty())
             g_confCache.maxFps = atoi(fps.c_str());
@@ -723,8 +743,16 @@ namespace dxvk_download
         out += "# edits to the keys below will be overwritten.  The proxy points\n";
         out += "# DXVK here via DXVK_CONFIG_FILE - this file does not belong in\n";
         out += "# the game folder.  Anything not listed below runs at the default.\n";
-        if (c.hud)
-            out += "dxvk.hud=fps,frametimes,gpuload\n";
+        std::string hud;
+        for (const HudName& n : kHudNames)
+            if (c.hud & n.bit)
+            {
+                if (!hud.empty())
+                    hud += ",";
+                hud += n.name;
+            }
+        if (!hud.empty())
+            out += "dxvk.hud=" + hud + "\n";
         if (c.maxFps > 0)
             out += "dxgi.maxFrameRate=" + std::to_string(c.maxFps) + "\n";
         out += std::string("dxvk.tearFree=") + tear + "\n";

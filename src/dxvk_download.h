@@ -106,11 +106,28 @@ namespace dxvk_download
     // the ones this interface keeps boring.
     struct Conf
     {
-        bool hud = false;    // dxvk.hud - the fps/frametimes/gpuload trio,
-                             // OFF by default: a fps overlay is something the
-                             // player opts into, not ambient chrome
+        unsigned hud = 0;    // dxvk.hud as a bitmask of HudElement.  0 writes no
+                             // dxvk.hud line at all, i.e. the HUD stays off -
+                             // the ticks ARE the switch, there is no second
+                             // master checkbox to keep in sync with them.
         int maxFps = 0;      // dxgi.maxFrameRate - 0 = uncapped
         int tearFree = 0;    // dxvk.tearFree - 0 Auto / 1 True / 2 False
+    };
+
+    // dxvk.hud takes a comma-separated list of elements; DXVK 3.1.1's README
+    // is the authority on the names.  The page exposes the six a player can
+    // act on - the rest (submissions, pipelines, descriptors, allocations, cs,
+    // samplers, swvp) are engine counters that mean nothing in a game overlay.
+    // Note it is a plain bitmask: the conf layer writes the names, the overlay
+    // only sets and clears bits.
+    enum HudElement
+    {
+        HUD_FPS        = 1u << 0,   // fps - the frame rate
+        HUD_FRAMETIMES = 1u << 1,   // frametimes - the frame time graph
+        HUD_GPULOAD    = 1u << 2,   // gpuload - approximate, DXVK says so too
+        HUD_MEMORY     = 1u << 3,   // memory - device memory allocated / used
+        HUD_COMPILER   = 1u << 4,   // compiler - shader compile activity
+        HUD_DEVINFO    = 1u << 5,   // devinfo - GPU name + driver version
     };
 
     // Cached read of the conf (documented defaults when absent).  The file is

@@ -104,7 +104,14 @@ namespace
         c[ImGuiCol_FrameBgActive] = ImVec4(0.220f, 0.220f, 0.220f, 1.00f);
         c[ImGuiCol_Button] = ImVec4(0.160f, 0.160f, 0.160f, 1.00f);
         c[ImGuiCol_ButtonHovered] = ImVec4(0.160f, 0.160f, 0.160f, 1.00f); // no hover tint
-        c[ImGuiCol_ButtonActive] = ImVec4(1.000f, 0.459f, 0.004f, 1.00f); // #FF7501
+        // [LOCAL] The held colour used to BE the accent (#FF7501), so a click
+        // flashed the full orange for as long as the mouse stayed down (owner,
+        // 2026-09-17: "按钮点了都会闪一下才是橙色").  Worse, held and SELECTED
+        // looked identical, so a page/language tab read as "already selected"
+        // before the button was even released.  One grey step above the resting
+        // colour keeps the press visible while leaving the accent exactly one
+        // meaning in this panel: selected.
+        c[ImGuiCol_ButtonActive] = ImVec4(0.240f, 0.240f, 0.240f, 1.00f);
         c[ImGuiCol_CheckMark] = kAccent;
         c[ImGuiCol_SliderGrab] = kAccent;
         c[ImGuiCol_SliderGrabActive] = ImVec4(1.000f, 0.560f, 0.100f, 1.00f);
@@ -348,6 +355,16 @@ namespace
         // 一个说明").  Hangs off the enable toggle - the one control whose name
         // ("Enable DXVK") assumes the player already knows what DXVK is.
         const char* dxvkToggleTip;
+        // [LOCAL] One label per dxvk.hud element (2026-09-17, user request:
+        // "我只想显示某一个？给一个勾选显示哪些").  Tailed like the tooltips
+        // above, for the same positional-table reason; this order is also the
+        // order of the ticks and of the names written into dxvk.hud.
+        const char* dxvkHudFps;
+        const char* dxvkHudFrametimes;
+        const char* dxvkHudGpuload;
+        const char* dxvkHudMemory;
+        const char* dxvkHudCompiler;
+        const char* dxvkHudDevinfo;
     };
 
     constexpr MenuText kTextZh = {
@@ -395,7 +412,9 @@ namespace
         "（需先开启 mod 汉化）",
         "关于",
         // 图形页提示（2026-09-17 用户要求）：HUD 说明显示什么；撕裂控制逐项说明效果。
-        "在画面上叠加显示 FPS、帧时间与 GPU 占用。",
+        // 同日二次修订：HUD 改成逐项勾选后，这句改成"勾哪些就显示哪些"。
+        "勾选要在画面上叠加显示的项。\n"
+        "全部不勾选即关闭 HUD；重启游戏后生效。",
         "自动：交由 DXVK 判断。\n"
         "无撕裂：关垂直同步时改用 mailbox 呈现（部分系统不支持）。\n"
         "低延迟：开垂直同步时改用 relaxed fifo，可能撕裂、但卡顿更少。\n"
@@ -403,7 +422,9 @@ namespace
         // 启用 DXVK 的说明（09-17 用户要求）：它是什么 + 什么时候值得试 + 代价。
         "把游戏的 D3D11 调用转译成 Vulkan 渲染。\n"
         "适合原本就卡顿的游戏：它在后台线程编译着色器，减少「边玩边编」引起的一顿一顿。\n"
-        "需要显卡已装 Vulkan 驱动；改动重启游戏后生效。"
+        "需要显卡已装 Vulkan 驱动；改动重启游戏后生效。",
+        // HUD 逐项（09-17 用户要求）：每一项都短，两行刚好放得下六个。
+        "帧率", "帧时间", "GPU 负载", "显存", "着色器", "设备"
     };
     constexpr MenuText kTextEn = {
         "SETTINGS", "TOGGLES", "STATUS", "CONFIG",
@@ -450,7 +471,8 @@ namespace
         "Zombies untranslated as well.  Campaign is unaffected.\n"
         "(Requires mod translation.)",
         "About",
-        "Overlays FPS, frame times and GPU load on the screen.",
+        "Tick the items to overlay on the screen.\n"
+        "Untick everything to turn the HUD off; takes effect after a restart.",
         "Auto: DXVK decides.\n"
         "No tearing: mailbox presentation while Vsync is off (unsupported on some systems).\n"
         "Low latency: relaxed fifo while Vsync is on - may tear, but stutters less.\n"
@@ -458,7 +480,8 @@ namespace
         "Renders the game through Vulkan: its D3D11 calls are translated to Vulkan.\n"
         "Worth trying when the game already stutters - it compiles shaders on worker\n"
         "threads, which cuts the hitches caused by compiling them while you play.\n"
-        "Needs a Vulkan driver installed; takes effect after a restart."
+        "Needs a Vulkan driver installed; takes effect after a restart.",
+        "FPS", "Frametime", "GPU load", "VRAM", "Shaders", "Device"
     };
 
     const MenuText* L()
@@ -537,7 +560,18 @@ namespace
         const ImVec2 pos = ImGui::GetCursorScreenPos();
         const float lineHeight = ImGui::GetTextLineHeight();
         const float totalHeight = (boxSize > lineHeight) ? boxSize : lineHeight;
-        const float boxY = pos.y + (totalHeight - boxSize) * 0.5f;
+        // [LOCAL] The label - and with it the box - is drawn at the FRAME
+        // PADDING offset instead of at the top of the row.  Button/InputText put
+        // their text there, so without this the box and its label sat 4 px above
+        // the neighbouring button's text on every row that mixes the two
+        // ("启用 DXVK" + "获取DXVK"), which is one half of the owner's
+        // "轻微高低差 / 不是中心平行对齐" report (2026-09-17).
+        // The ROW keeps its old height on purpose: ImGui::Checkbox() uses a full
+        // frame height plus that same offset, but the panel is a fixed 395x440
+        // with no scrollbar, and +8 px on every checkbox row pushes page 1's
+        // last card past the bottom.
+        const float labelY = pos.y + style.FramePadding.y;
+        const float boxY = labelY + (lineHeight - boxSize) * 0.5f;
 
         ImGui::InvisibleButton(label,
             ImVec2(boxSize + style.ItemInnerSpacing.x + labelSize.x, totalHeight));
@@ -573,10 +607,115 @@ namespace
             dl->AddRect(p0, p1, outline, 2.0f, 0, 1.2f);
         }
 
-        dl->AddText(ImVec2(p1.x + style.ItemInnerSpacing.x,
-                pos.y + (totalHeight - lineHeight) * 0.5f),
+        dl->AddText(ImVec2(p1.x + style.ItemInnerSpacing.x, labelY),
             ImGui::GetColorU32(ImGuiCol_Text), label);
 
+        return clicked;
+    }
+
+    // One dxvk.hud element tick.  The bitmask in Conf is the only source of
+    // truth, so the helper owns both the "is this bit on" read and the ConfSet
+    // write; the call sites are one line each and normally follow the previous
+    // item on the same line (that is what sameLine is for).  The first tick of
+    // a NEW row passes sameLine = false - the ticks wrap onto a second row and
+    // without this the helper would glue it back onto the first one, which is
+    // exactly how the six ticks ended up running off the panel edge.
+    void HudTick(const char* label, unsigned bit, dxvk_download::Conf& conf,
+        bool sameLine = true)
+    {
+        if (sameLine)
+            ImGui::SameLine();
+        bool on = (conf.hud & bit) != 0;
+        if (SolidCheckbox(label, &on))
+        {
+            conf.hud = on ? (conf.hud | bit) : (conf.hud & ~bit);
+            dxvk_download::ConfSet(conf);
+        }
+    }
+
+    // [LOCAL] Drawn guide for a block of indented sub-options: a vertical line
+    // inside the indent gap plus one elbow per sub-item, so "these belong to the
+    // switch above" is SHOWN and not merely implied by the indent (owner,
+    // 2026-09-17: "子选项设置跟主设置树状图的分支线 UI 效果…看着更有归类感").
+    // The indent stays exactly as it was - the line only explains it, so no row
+    // budget is spent.
+    //
+    // Usage, inside the BeginDisabled + Indent pair:
+    //     SubTree tree;
+    //     ... sub-item 1 ...            tree.Row();   // after its LAST widget
+    //     ... extra rows of item 1 ...               // no Row() - same item
+    //     ... sub-item 2 ...            tree.Row();
+    //     tree.Draw();
+    //
+    // It draws AFTER the items on purpose: the guide lives in the indent gap and
+    // never crosses a widget, so no draw-list channel juggling is needed.
+    struct SubTree
+    {
+        float lineX = 0.0f;    // the vertical line
+        float elbowX = 0.0f;   // where the elbows stop, just short of the items
+        float topY = 0.0f;     // starts at the parent row's bottom edge
+        float ys[8] = {};      // elbow centres, in draw order
+        int count = 0;
+
+        SubTree()
+        {
+            // Indent() has already moved the cursor, so this is the sub-items'
+            // left edge (parent + 12); the line and the elbows live inside that
+            // gap.  The top is one ItemSpacing above the first row, i.e. the
+            // parent row's bottom edge - the guide starts right under the switch
+            // it belongs to, never over it.
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            lineX = p.x - 10.0f;
+            elbowX = p.x - 4.0f;
+            topY = p.y - ImGui::GetStyle().ItemSpacing.y;
+        }
+
+        // Once per sub-item, after its last widget.
+        void Row()
+        {
+            if (count < (int)(sizeof(ys) / sizeof(ys[0])))
+                ys[count++] = (ImGui::GetItemRectMin().y
+                    + ImGui::GetItemRectMax().y) * 0.5f;
+        }
+
+        void Draw() const
+        {
+            if (count == 0)
+                return;
+            // Hand-drawn colours do not pick up style.Alpha by themselves - the
+            // same reason SolidCheckbox folds it in - and a greyed block (DXVK
+            // off, mod 汉化 off) must not keep a full-strength guide.  The hue is
+            // the panel's own accent at low alpha: visible, never loud.
+            const int a = (int)(ImGui::GetStyle().Alpha * 100.0f + 0.5f);
+            const ImU32 col = IM_COL32(255, 117, 1, a);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddLine(ImVec2(lineX, topY),
+                ImVec2(lineX, ys[count - 1]), col, 1.0f);
+            for (int i = 0; i < count; ++i)
+                dl->AddLine(ImVec2(lineX, ys[i]), ImVec2(elbowX, ys[i]), col, 1.0f);
+        }
+    };
+
+    // [LOCAL] A step button that DRAWS its sign instead of using the font's
+    // glyph.  ImGui centres the whole text LINE BOX in a button, and the font's
+    // minus/plus are drawn around the baseline inside that box - which reserves
+    // descent space below it - so in a 20 px button the signs landed 3.5 px low
+    // and 1-2 px right (measured on the owner's screenshot, 2026-09-17:
+    // "加减符号怎么靠右下了").  Two strokes we draw ourselves sit exactly on the
+    // centre, and they match each other's weight - the font's thin hyphen and
+    // heavier plus do not.
+    bool StepButton(const char* id, float side, bool plus)
+    {
+        const bool clicked = ImGui::Button(id, ImVec2(side, side));
+        const ImVec2 a = ImGui::GetItemRectMin();
+        const ImVec2 b = ImGui::GetItemRectMax();
+        const ImVec2 c((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f);
+        const float arm = 3.5f;
+        const ImU32 col = ImGui::GetColorU32(ImGuiCol_Text);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddLine(ImVec2(c.x - arm, c.y), ImVec2(c.x + arm, c.y), col, 1.5f);
+        if (plus)
+            dl->AddLine(ImVec2(c.x, c.y - arm), ImVec2(c.x, c.y + arm), col, 1.5f);
         return clicked;
     }
 
@@ -764,15 +903,40 @@ namespace
                 const bool dxSettingsOn = dxAvailable && dxOn;
                 ImGui::BeginDisabled(!dxSettingsOn);
                 ImGui::Indent(12.0f);
+                // The guide that ties every row below to the switch above.
+                SubTree tree;
 
-                if (SolidCheckbox(L()->dxvkHud, &dc.hud))
-                    dxvk_download::ConfSet(dc);
+                // [LOCAL] The HUD used to be one on/off checkbox that always
+                // wrote the same fps,frametimes,gpuload trio.  It is one tick
+                // per element now (owner, 2026-09-17: "我只想显示某一个？给一个
+                // 勾选显示哪些"), and "nothing ticked" IS "no dxvk.hud line" -
+                // so there is no master switch that could disagree with the
+                // ticks.  Six ticks, two rows: the second row is indented under
+                // the FIRST TICK (not under the label) so the block reads as one.
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(L()->dxvkHud);
                 // Readable while greyed on purpose: the style carries
                 // ImGuiHoveredFlags_AllowWhenDisabled, which is exactly the state
                 // where "what does this show?" needs an answer.
                 ImGui::SetItemTooltip("%s", L()->dxvkHudTip);
+                HudTick(L()->dxvkHudFps, dxvk_download::HUD_FPS, dc);
+                HudTick(L()->dxvkHudFrametimes, dxvk_download::HUD_FRAMETIMES, dc);
+                HudTick(L()->dxvkHudGpuload, dxvk_download::HUD_GPULOAD, dc);
+                tree.Row();   // the HUD item; the tick row under it is its own
 
-                ImGui::SameLine();
+                const float hudTickIndent = ImGui::CalcTextSize(L()->dxvkHud).x
+                    + ImGui::GetStyle().ItemSpacing.x;
+                ImGui::Indent(hudTickIndent);
+                // Starts the line: the three ticks would otherwise wrap right
+                // back onto the row above and run off the panel (owner's
+                // screenshot, 2026-09-17).
+                HudTick(L()->dxvkHudMemory, dxvk_download::HUD_MEMORY, dc, false);
+                HudTick(L()->dxvkHudCompiler, dxvk_download::HUD_COMPILER, dc);
+                HudTick(L()->dxvkHudDevinfo, dxvk_download::HUD_DEVINFO, dc);
+                ImGui::Unindent(hudTickIndent);
+
+                // Own row since 2026-09-17: it used to share its line with the
+                // HUD switch, which is two rows of ticks now.
                 const char* tearWord = (dc.tearFree == 1) ? L()->dxvkTearOn
                     : (dc.tearFree == 2) ? L()->dxvkTearOff : L()->dxvkTearAuto;
                 char tearBtn[96]{};
@@ -786,14 +950,30 @@ namespace
                 // Spells out all three values, because the label alone cannot
                 // (DXVK's own doc ties each value to the Vsync state).
                 ImGui::SetItemTooltip("%s", L()->dxvkTearTip);
+                tree.Row();   // the tear-control row
 
-                // [LOCAL] The +/- pair used to be the integer widget's own step
-                // buttons: full frame-height squares beside a 120 px field, which
-                // read as two empty boxes (owner's screenshot, 2026-09-17: "加减
-                // 按钮弄小点，太大了很空").  The widget is therefore asked for no
-                // step buttons at all, and the two compact ones below replace
-                // them; the field is narrower for the same reason.
+                // [LOCAL] Row alignment (owner's report, 2026-09-17: "很多布局文本
+                // 和组件都有轻微高低差，不是中心平行对齐").  ImGui aligns same-line
+                // items to the TOP of the line, so anything that is not a full
+                // frame height - and any bare Text() - lands a few pixels high.
+                // That is the whole of the "slight height difference" he saw.
+                // Two consequences on this row:
+                //   * the label is the FIRST item on the line, so it needs
+                //     AlignTextToFramePadding() by hand - exactly the call the
+                //     settings table below makes for its column labels.  A Text()
+                //     that follows a frame on the same line inherits the offset
+                //     through SameLine() and must NOT be given a second one.
+                //   * the +/- pair is a SQUARE of its own (frame height - 6) and
+                //     is dropped by half the height difference to sit centred on
+                //     the row.  Full frame height made two tall pills (owner,
+                //     2026-09-17: "这个加减按钮不美观"), and letting ImGui do the
+                //     centring does not work either - same-line items are top
+                //     aligned.  The drop is derived, and cannot grow the row:
+                //     3 + 20 < 26.  They replace the integer widget's own step
+                //     buttons, which read as two empty boxes beside a 120 px
+                //     field ("加减按钮弄小点，太大了很空").
                 int prevFps = dc.maxFps;
+                ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(L()->dxvkMaxFps);
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(90.0f);
@@ -805,19 +985,27 @@ namespace
                 if (ImGui::IsItemDeactivatedAfterEdit() && dc.maxFps != prevFps)
                     dxvk_download::ConfSet(dc);
 
-                const float fpsStepSide = ImGui::GetFrameHeight() - 6.0f;
+                const float fpsRowHeight = ImGui::GetFrameHeight();
+                const float fpsStepSide = fpsRowHeight - 6.0f;          // 20 x 20
+                const float fpsStepDrop = (fpsRowHeight - fpsStepSide) * 0.5f;
                 ImGui::SameLine(0.0f, 4.0f);
-                if (ImGui::Button("-##dxvkfpsminus", ImVec2(fpsStepSide, fpsStepSide)))
+                ImVec2 fpsStepPos = ImGui::GetCursorScreenPos();
+                ImGui::SetCursorScreenPos(ImVec2(fpsStepPos.x, fpsStepPos.y + fpsStepDrop));
+                if (StepButton("##dxvkfpsminus", fpsStepSide, false))
                 {
                     dc.maxFps = (dc.maxFps > 0) ? dc.maxFps - 1 : 0;
                     dxvk_download::ConfSet(dc);
                 }
                 ImGui::SameLine(0.0f, 4.0f);
-                if (ImGui::Button("+##dxvkfpsplus", ImVec2(fpsStepSide, fpsStepSide)))
+                fpsStepPos = ImGui::GetCursorScreenPos();
+                ImGui::SetCursorScreenPos(ImVec2(fpsStepPos.x, fpsStepPos.y + fpsStepDrop));
+                if (StepButton("##dxvkfpsplus", fpsStepSide, true))
                 {
                     dc.maxFps = (dc.maxFps < 1000) ? dc.maxFps + 1 : 1000;
                     dxvk_download::ConfSet(dc);
                 }
+                tree.Row();   // the FPS-cap row - the last branch
+                tree.Draw();
 
                 ImGui::Unindent(12.0f);
                 ImGui::EndDisabled();
@@ -913,6 +1101,8 @@ namespace
                 const bool transOn = t7patch_cfg_translate_enabled();
                 ImGui::BeginDisabled(!transOn);
                 ImGui::Indent(12.0f);
+                // The guide that ties the two switches below to mod 汉化.
+                SubTree tree;
 
                 bool pvpSkip = t7patch_cfg_skip_pvp();
                 if (SolidCheckbox(L()->pvpSkip, &pvpSkip))
@@ -921,6 +1111,7 @@ namespace
                     t7patch_config_save();
                 }
                 ImGui::SetItemTooltip("%s", L()->pvpSkipTip);
+                tree.Row();
 
                 bool zmSkip = t7patch_cfg_skip_zm();
                 if (SolidCheckbox(L()->zmSkip, &zmSkip))
@@ -929,6 +1120,8 @@ namespace
                     t7patch_config_save();
                 }
                 ImGui::SetItemTooltip("%s", L()->zmSkipTip);
+                tree.Row();
+                tree.Draw();
 
                 ImGui::Unindent(12.0f);
                 ImGui::EndDisabled();
@@ -1048,6 +1241,9 @@ namespace
         BeginCardSized(L()->config, ImGui::GetContentRegionAvail().y);
         {
             // Language: two small buttons, the active one drawn in accent.
+            // The label leads its line, so it needs the frame padding offset by
+            // hand (see the FPS cap row on the graphics page).
+            ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(L()->language);
             ImGui::SameLine(100.0f);
             const bool zhActive = t7patch_cfg_menu_lang() != 0;
@@ -1064,6 +1260,9 @@ namespace
             }
 
             // Hotkey: click the button, then press the new key (ESC cancels).
+            // Same leading-label offset as the language row; the inline hint at
+            // the end of this line inherits it through SameLine().
+            ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(L()->hotkey);
             ImGui::SameLine(100.0f);
             // [LOCAL] While waiting for the new key the button STAYS - same size,
