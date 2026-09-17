@@ -338,6 +338,16 @@ namespace
         const char* zmSkip;
         const char* zmSkipTip;
         const char* about;
+        // [LOCAL] Graphics-page tooltips (2026-09-17, user request).  Appended at
+        // the TAIL on purpose: both tables below are positional, so appending
+        // cannot silently shift an existing pair - and check_menu_text.py only
+        // verifies arity, never order.
+        const char* dxvkHudTip;
+        const char* dxvkTearTip;
+        // [LOCAL] What the backend IS (2026-09-17, user request: "再给 DXVK 增加
+        // 一个说明").  Hangs off the enable toggle - the one control whose name
+        // ("Enable DXVK") assumes the player already knows what DXVK is.
+        const char* dxvkToggleTip;
     };
 
     constexpr MenuText kTextZh = {
@@ -383,7 +393,17 @@ namespace
         "默认关闭：僵尸对局照常翻译。\n"
         "打开后僵尸对局也不翻译；战役不受影响。\n"
         "（需先开启 mod 汉化）",
-        "关于"
+        "关于",
+        // 图形页提示（2026-09-17 用户要求）：HUD 说明显示什么；撕裂控制逐项说明效果。
+        "在画面上叠加显示 FPS、帧时间与 GPU 占用。",
+        "自动：交由 DXVK 判断。\n"
+        "无撕裂：关垂直同步时改用 mailbox 呈现（部分系统不支持）。\n"
+        "低延迟：开垂直同步时改用 relaxed fifo，可能撕裂、但卡顿更少。\n"
+        "（这不是垂直同步开关 —— 垂直同步由游戏内设置控制。）",
+        // 启用 DXVK 的说明（09-17 用户要求）：它是什么 + 什么时候值得试 + 代价。
+        "把游戏的 D3D11 调用转译成 Vulkan 渲染。\n"
+        "适合原本就卡顿的游戏：它在后台线程编译着色器，减少「边玩边编」引起的一顿一顿。\n"
+        "需要显卡已装 Vulkan 驱动；改动重启游戏后生效。"
     };
     constexpr MenuText kTextEn = {
         "SETTINGS", "TOGGLES", "STATUS", "CONFIG",
@@ -429,7 +449,16 @@ namespace
         "Off by default: Zombies is translated normally.  Tick this to leave\n"
         "Zombies untranslated as well.  Campaign is unaffected.\n"
         "(Requires mod translation.)",
-        "About"
+        "About",
+        "Overlays FPS, frame times and GPU load on the screen.",
+        "Auto: DXVK decides.\n"
+        "No tearing: mailbox presentation while Vsync is off (unsupported on some systems).\n"
+        "Low latency: relaxed fifo while Vsync is on - may tear, but stutters less.\n"
+        "(Not the Vsync switch - Vsync follows the game's own setting.)",
+        "Renders the game through Vulkan: its D3D11 calls are translated to Vulkan.\n"
+        "Worth trying when the game already stutters - it compiles shaders on worker\n"
+        "threads, which cuts the hitches caused by compiling them while you play.\n"
+        "Needs a Vulkan driver installed; takes effect after a restart."
     };
 
     const MenuText* L()
@@ -680,6 +709,13 @@ namespace
                         dxvk_download::Disable();
                 }
                 ImGui::EndDisabled();
+                // [LOCAL] What the backend actually IS - "启用 DXVK" assumes the
+                // player already knows (2026-09-17, user request).  Reads while
+                // greyed too, which is exactly when "should I get this at all?"
+                // is the live question: the style carries AllowWhenDisabled, and
+                // EndDisabled() only pops the item flag, so the preceding item is
+                // still the checkbox.
+                ImGui::SetItemTooltip("%s", L()->dxvkToggleTip);
 
                 ImGui::SameLine();
                 char dxBtn[96]{};
@@ -715,11 +751,26 @@ namespace
                 // conf for a backend that is not on disk is dead weight.  All
                 // three rewrite dxvk.conf and take effect on the next launch -
                 // DXVK parses the file once, at device creation.
+                //
+                // [LOCAL] They are ALSO disabled - and indented - while the DXVK
+                // switch above is off.  Owner's calls, 2026-09-17: "当 DXVK 被
+                // 关闭的时候那些子选项应该被禁用" and "这个布局没有体现是他的子
+                // 选项".  Deliberately the same two idioms the scene sub-switches
+                // on the first page use (BeginDisabled + Indent(12)), so the two
+                // places read alike.  Indent only narrows the row, never adds
+                // one: the panel is a fixed 395x440 with no scrollbar.
                 dxvk_download::Conf dc = dxvk_download::ConfGet();
 
-                ImGui::BeginDisabled(!dxAvailable);
+                const bool dxSettingsOn = dxAvailable && dxOn;
+                ImGui::BeginDisabled(!dxSettingsOn);
+                ImGui::Indent(12.0f);
+
                 if (SolidCheckbox(L()->dxvkHud, &dc.hud))
                     dxvk_download::ConfSet(dc);
+                // Readable while greyed on purpose: the style carries
+                // ImGuiHoveredFlags_AllowWhenDisabled, which is exactly the state
+                // where "what does this show?" needs an answer.
+                ImGui::SetItemTooltip("%s", L()->dxvkHudTip);
 
                 ImGui::SameLine();
                 const char* tearWord = (dc.tearFree == 1) ? L()->dxvkTearOn
@@ -732,18 +783,43 @@ namespace
                     dc.tearFree = (dc.tearFree + 1) % 3;
                     dxvk_download::ConfSet(dc);
                 }
+                // Spells out all three values, because the label alone cannot
+                // (DXVK's own doc ties each value to the Vsync state).
+                ImGui::SetItemTooltip("%s", L()->dxvkTearTip);
 
+                // [LOCAL] The +/- pair used to be the integer widget's own step
+                // buttons: full frame-height squares beside a 120 px field, which
+                // read as two empty boxes (owner's screenshot, 2026-09-17: "加减
+                // 按钮弄小点，太大了很空").  The widget is therefore asked for no
+                // step buttons at all, and the two compact ones below replace
+                // them; the field is narrower for the same reason.
                 int prevFps = dc.maxFps;
                 ImGui::TextUnformatted(L()->dxvkMaxFps);
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth(120.0f);
-                ImGui::InputInt("##dxvkmaxfps", &dc.maxFps);
+                ImGui::SetNextItemWidth(90.0f);
+                ImGui::InputInt("##dxvkmaxfps", &dc.maxFps, 0, 0);
                 if (dc.maxFps < 0)
                     dc.maxFps = 0;
                 if (dc.maxFps > 1000)
                     dc.maxFps = 1000;
                 if (ImGui::IsItemDeactivatedAfterEdit() && dc.maxFps != prevFps)
                     dxvk_download::ConfSet(dc);
+
+                const float fpsStepSide = ImGui::GetFrameHeight() - 6.0f;
+                ImGui::SameLine(0.0f, 4.0f);
+                if (ImGui::Button("-##dxvkfpsminus", ImVec2(fpsStepSide, fpsStepSide)))
+                {
+                    dc.maxFps = (dc.maxFps > 0) ? dc.maxFps - 1 : 0;
+                    dxvk_download::ConfSet(dc);
+                }
+                ImGui::SameLine(0.0f, 4.0f);
+                if (ImGui::Button("+##dxvkfpsplus", ImVec2(fpsStepSide, fpsStepSide)))
+                {
+                    dc.maxFps = (dc.maxFps < 1000) ? dc.maxFps + 1 : 1000;
+                    dxvk_download::ConfSet(dc);
+                }
+
+                ImGui::Unindent(12.0f);
                 ImGui::EndDisabled();
 
                 ImGui::TextUnformatted(L()->dxvkSettingsNote);
