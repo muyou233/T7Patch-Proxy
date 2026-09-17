@@ -10,14 +10,33 @@
 //     file is missing, corrupt or empty - before this, losing that one file
 //     silently disabled the whole feature.
 //
-// Consequence: this resource only has to be recompiled when the BUILT-IN copy
-// should move forward - i.e. on a release.  Editing translate_zh.txt for the
-// running game does NOT need a rebuild.
+// [LOCAL] The resource points at a PINNED SNAPSHOT, not at the live dictionary.
+//   - It deliberately reads translate_zh.builtin.txt, NOT the file the project
+//     keeps editing (translate/translate_zh.txt).  Pointing it straight at the
+//     live file meant every code rebuild silently shipped whatever state the
+//     dictionary happened to be in at that moment - including half-finished
+//     edits - so the built-in could never be reasoned about.
+//   - Refreshing the snapshot is a DELIBERATE release step, and the only moment
+//     the built-in ever moves forward:
+//       1. finish the dictionary and push it (players receive it through the
+//          overlay's update button, or a deploy - the built-in never follows by
+//          itself, and it never has to);
+//       2. copy translate/translate_zh.txt over translate/translate_zh.builtin.txt
+//          (a byte copy, sha256 must match);
+//       3. recompile.
+//   - Verify with .workbuddy\ref\embed_verify.py: it compares the image against
+//     the PINNED file and must say "BYTE-IDENTICAL to source : True".  It also
+//     prints how far the live dictionary has drifted ahead of the snapshot.
+//
+// Consequence: this resource only needs recompiling when the snapshot is
+// refreshed - i.e. on a release.  Editing translate_zh.txt for the running game
+// never needs a rebuild.
 //
 // The path is relative to this .rc file (rc.exe resolves relative paths against
-// the directory of the resource script), i.e. <repo>\translate\translate_zh.txt.
+// the directory of the resource script), i.e.
+// <repo>\translate\translate_zh.builtin.txt.
 
 #include <windows.h>
 #include "translate_res.h"
 
-IDR_TRANSLATE_DICT RCDATA "..\\translate\\translate_zh.txt"
+IDR_TRANSLATE_DICT RCDATA "..\\translate\\translate_zh.builtin.txt"
