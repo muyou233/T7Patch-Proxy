@@ -46,7 +46,7 @@ namespace
     // [LOCAL] Target of the GitHub mark pinned to the panel's bottom-right
     // corner.  Hard-coded on purpose: the icon opens it via the shell, so
     // anything user-editable here would be an injection vector for no gain.
-    constexpr const char* kRepoUrl = "https://github.com/muyou233/T7Patch-src";
+    constexpr const char* kRepoUrl = "https://github.com/muyou233/T7Patch-Proxy";
 
     // [LOCAL] The mark is drawn from an alpha mask (GithubMark.h) into a WHITE
     // texture, so these two colours are a pure tint - the icon can be recoloured

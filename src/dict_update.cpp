@@ -45,12 +45,12 @@ namespace dict_update
         constexpr Source kSources[] =
         {
             {
-                L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-src@main"
+                L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
                 L"/translate/translate_zh.txt",
                 false
             },
             {
-                L"https://raw.githubusercontent.com/muyou233/T7Patch-src"
+                L"https://raw.githubusercontent.com/muyou233/T7Patch-Proxy"
                 L"/main/translate/translate_zh.txt",
                 false
             },

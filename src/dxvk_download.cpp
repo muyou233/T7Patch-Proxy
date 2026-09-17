@@ -44,9 +44,9 @@ namespace dxvk_download
             {
                 "d3d11_backend.dll",
                 {
-                    L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-src@main"
+                    L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
                     L"/dxvk/d3d11_backend.dll",
-                    L"https://raw.githubusercontent.com/muyou233/T7Patch-src"
+                    L"https://raw.githubusercontent.com/muyou233/T7Patch-Proxy"
                     L"/main/dxvk/d3d11_backend.dll",
                 },
                 "0A203B6255C893430F0A8461C618962DF04E62AA41538D5A875B21868317CF9F",
@@ -54,9 +54,9 @@ namespace dxvk_download
             {
                 "dxgi.dll",
                 {
-                    L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-src@main"
+                    L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
                     L"/dxvk/dxgi.dll",
-                    L"https://raw.githubusercontent.com/muyou233/T7Patch-src"
+                    L"https://raw.githubusercontent.com/muyou233/T7Patch-Proxy"
                     L"/main/dxvk/dxgi.dll",
                 },
                 "E3C1178EB7F0DD59F91BCFCC257549E5B9CFDB5E8508719293DE7F8704F53160",
