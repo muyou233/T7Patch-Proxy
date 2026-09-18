@@ -527,11 +527,11 @@ my showcase=我的展示
 #   `ascension`：灰机作「阿森松」⇒ 按灰机优先改（原「升天」是 Fandom 的直译写法）。
 #   `shangri-la`：灰机作「世外桃源」⇒ 按灰机优先改（原「香格里拉」虽是 Shangri-La 的通用中文，但定了灰机优先就跟着灰机）。
 shadows of evil=恶灵之影
-the giant=巨人
+~the giant=巨人
 # `Der Riese` = BO3 那张 `The Giant` 的**原版（WAW）德语名**（der Riese＝巨人）⇒ 直译「巨人」，与 `the giant` 口径一致。
 # （用户 2026-09-18 问过"为啥重返没翻译" ⇒ `Return to Verruckt` 已加整条；这一条是同一批补的。）
 # 本词无变音字母（Riese 全 ASCII）⇒ 不需要像 Verruckt 那样收多个拼写变体，一条足矣。
-der riese=巨人
+~der riese=巨人
 der eisendrache=钢铁之龙
 zetsubou no shima=绝望之岛
 gorod krovi=血狱之城
@@ -570,7 +570,7 @@ return to verruckt=重返疯狂
 return to verrückt=重返疯狂
 return to verrÜckt=重返疯狂
 nuketown zombies=僵尸核弹镇
-die rise=死亡高楼
+~die rise=死亡高楼
 morg city, usa=美国莫格城
 excavation site 64, northern france=法国北部 64 号发掘场
 take to the streets of morg city to combat the undead. embrace the curse to uncover its mysteries.=走上莫格城的街头对抗亡灵。接受诅咒，揭开它的秘密。
@@ -1257,6 +1257,44 @@ hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
 # ⇒ 直译且不偏颇 ⇒ 收录。⚠️ 同为后续作的 `Kill-O-Watt`（kilowatt＋kill 双关）**保留原文** —— 谐音梗译不出就不硬译。
 ~light mend=光明愈合
 ~shatter blast=碎裂冲击
+# ── T7Patch 设置界面 / 地图信息文本（2026-09-18 第三十二轮，用户："又新增了快去翻译吧"）──────────
+# 来源 = `dev_pipeline.py`（dict_triage）的「界面文本候选」工作清单。103 条里**剔除了不该翻的**：
+# 玩家名/赞助者名（`CornstarPopps!` / `Killa Kyeone` / `Mj SanTop` …）、公屏聊天（`anyone fancy it?` /
+# `tell ur boy to make me lvl 55` …）、大写工坊地图名（`ADLERSTADT` / `STANDBY` / `INFECTED` …）、
+# `[img]` 图片 URL、`host xxx`、地理位置串 ⇒ 剩下这些真正是界面/说明文本。
+# 译法遵循"创意工坊口径"（能译且不偏颇就译）；`EZ TARGET` 维持既有的**有意保留原文**。
+~favorite/unfavorite=收藏 / 取消收藏
+~playable character=可玩角色
+~player settings=玩家设置
+~supporter names=赞助者名称
+~special rounds=特殊回合
+~workshop page=创意工坊页面
+~game settings=游戏设置
+~refresh maps=刷新地图
+~skip intro=跳过开场动画
+~all maps=全部地图
+~supporter pack-a-punch names=赞助者改造武器名称
+~stats upload notification=战绩上传通知
+~supporter side quests=赞助者支线任务
+Start the match.=开始比赛。
+Toggle audio for hitmarkers.=开关命中标记音效。
+Toggle damage feedback on zombies.=开关僵尸伤害反馈。
+Choose the character you play as.=选择你要扮演的角色。
+NOTE: Does nothing if hitmarkers are disabled.=注意：命中标记关闭时此设置无效。
+NOTE: This only applies to solo matches.=注意：仅适用于单人比赛。
+Release the hounds! (or whatever the map has)=放出猎犬！（或该地图上的任何敌人）
+Choose the Zombies HUD design you play with.=选择你使用的僵尸模式 HUD 样式。
+Prints a confirmation message when your stats get successfully saved.=战绩成功保存时会显示确认信息。
+WARNING: Some supporter side quests require names to be visible.=警告：部分赞助者支线任务需要名称可见。
+Looking for a more authentic experience? Toggle Patreon supporter side quests.=想要更原汁原味的体验？开关 Patreon 赞助者支线任务。
+Trying to get right into the action? Skip the intro cinematic.=想直接进入战斗？跳过开场动画。
+Wanting a more authentic environment? Toggle Patreon supporter names in the map.=想要更原汁原味的环境？开关地图中的 Patreon 赞助者名称。
+Choose the weapons found in the Mystery Box and on the wall.=选择神秘宝箱与墙上出现的武器。
+Prefer the classic Pack'd weapon names? Toggle Patreon supporter Pack-a-Punch names in the map.=偏好经典的改造武器名称？开关地图中的 Patreon 赞助者改造武器名称。
+Call of the Dead=亡灵召唤
+Die Rise - Great Leap Forward=死亡高楼 - 大跃进
+A shipwrecked crew of fearless explorers is hopelessly stranded in an abandoned Siberian outpost. Their dream of discovering the true origins of the Element 115 unravels into a hellish nightmare.=一群无畏的探险家因海难被困在废弃的西伯利亚前哨站。他们追寻 115 号元素真正起源的梦想，最终化为一场地狱般的噩梦。
+The Giant is rising. Face the might of the Nazi Zombies in their heartland. This is where it all began. This is where the master plan took shape. Is this where it all ends?=巨人正在崛起。在他们的腹地直面纳粹僵尸的威势。一切由此开始，宏图在此成形。这里会是终结之地吗？
 # Fire Works ⇒ **爆裂焰火**。⚠️ 注意拼写：BO3 原文是**两个词** `Fire Works`（不是 `Fireworks`）——
 # 键必须按原文写。它是 **BO3 首发 5 种弹药之一**，并在 **BO7 回归**（Fandom `Alternate_Ammo_Type`：
 # BO7 = BO6 的 7 种 + 回归的 Fire Works）⇒ BO7 官方简中表里的「爆裂焰火」正是它 ⇒ 中英对应成立。
