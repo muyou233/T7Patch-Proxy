@@ -25,12 +25,14 @@
 //
 // Two switches live in t7patch.conf:
 //     translate=1        enable the replacement (default 0)
-//     dump_ui_strings=1  collection mode: record every distinct English UI
+//     dev_tools=1        collection mode: record every distinct English UI
 //                        string into T7Patch\ui_dump.txt (for building the
 //                        dictionary; default 0).  A run that already contains
 //                        CJK text is skipped, so the game's own Chinese is
 //                        never recorded - and English strings carrying
-//                        typographic quotes or accents are kept.
+//                        typographic quotes or accents are kept.  (Before
+//                        2026-09-18 this key was called dump_ui_strings; that
+//                        spelling is still read, but only dev_tools is written.)
 namespace translate
 {
     // Reads both switches from the config and loads the dictionary file.
@@ -72,7 +74,7 @@ namespace translate
     bool Lookup(const char* source, char* out, size_t outSize);
 
     // Collection mode: records a distinct UI string for the dictionary build.
-    // Records the same runs Lookup can match.  No-op unless dump_ui_strings=1.
+    // Records the same runs Lookup can match.  No-op unless dev_tools=1.
     // Deduplicated and capped, lock-protected.
     void Collect(const char* text);
 

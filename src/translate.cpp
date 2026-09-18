@@ -32,10 +32,37 @@ namespace translate
         };
         std::vector<WildPattern> g_patterns;
 
-        std::mutex g_mutex; // guards the two tables above and g_dictStamp
+        // Compositional fragments: a dictionary entry whose KEY starts with '~'
+        // may be substituted INSIDE a longer run, not only when it is the whole
+        // run.  That is what keeps a NEW combination translatable in the part
+        // that already has an agreed translation - "Rogue Run: Black Ops 3"
+        // becomes "Rogue Run: 黑色行动 3" from one marked fragment, with no
+        // hand-written entry for the combination and without having to invent a
+        // translation for the mod name itself (see the skill's ambiguity rule).
+        //
+        // Deliberately OPT-IN, entry by entry: only a key a human marked can
+        // fire.  A blanket "replace every dictionary key you find in the text"
+        // pass was rejected - the short single words ("menu", "play", "rogue")
+        // are exactly what player names, group names and workshop map names
+        // collide with.
+        //
+        // Ordered longest key first (stable for equal lengths), so "black ops 3"
+        // wins over a shorter fragment wherever both could match.
+        struct Fragment
+        {
+            std::string key;   // lower-cased source text, marker already stripped
+            std::string value; // the translation, used verbatim
+        };
+        std::vector<Fragment> g_fragments;
+
+        // Shorter than this and a marked fragment is a typo rather than a rule:
+        // a two-letter substring would fire inside unrelated words.
+        constexpr size_t kMinFragmentKey = 3;
+
+        std::mutex g_mutex; // guards the three tables above and g_dictStamp
 
         std::atomic<bool> g_enabled{ false }; // translate=1 AND the dictionary loaded
-        std::atomic<bool> g_collect{ false }; // dump_ui_strings=1
+        std::atomic<bool> g_collect{ false }; // dev_tools=1
 
         // [LOCAL] Scene gate - "the player is inside a match, in a mode whose
         // 'do not translate this scene' switch is on" (see SetSceneBlocked in
@@ -94,6 +121,7 @@ namespace translate
         {
             size_t entries = 0;
             size_t templates = 0;
+            size_t fragments = 0;
             size_t tooLong = 0;
         };
 
@@ -450,7 +478,64 @@ namespace translate
             return written > 0;
         }
 
-        // Caller holds g_mutex.  Exact first, then templates narrow-to-wide.
+        // Substitutes the marked fragments inside a run.  'lowerKey' and
+        // 'original' hold the same text - LowerInPlace only rewrites A-Z, so the
+        // two stay byte-for-byte index-aligned - and every untouched byte is
+        // copied out of 'original', which is what preserves the game's own casing
+        // around a replacement.
+        //
+        // Single left-to-right pass: at each position the longest matching
+        // fragment wins and the cursor jumps past it, so a replacement is never
+        // re-scanned and a fragment value containing Latin text cannot feed
+        // another fragment.  Returns false when nothing matched, in which case
+        // the caller keeps the game's text, exactly like an exact-entry miss.
+        bool ComposeFragments(const char* lowerKey, const char* original, char* out,
+            size_t outSize)
+        {
+            const size_t len = strlen(lowerKey);
+            size_t written = 0;
+            size_t at = 0;
+            bool matched = false;
+
+            while (at < len)
+            {
+                const Fragment* hit = nullptr;
+                for (const Fragment& f : g_fragments)
+                {
+                    if (f.key.size() <= len - at
+                        && memcmp(lowerKey + at, f.key.data(), f.key.size()) == 0)
+                    {
+                        hit = &f; // longest first: the first hit is the specific one
+                        break;
+                    }
+                }
+
+                if (!hit)
+                {
+                    if (written + 1 >= outSize)
+                        return false;
+                    out[written++] = original[at];
+                    ++at;
+                    continue;
+                }
+
+                if (written + hit->value.size() + 1 > outSize)
+                    return false;
+                memcpy(out + written, hit->value.data(), hit->value.size());
+                written += hit->value.size();
+                at += hit->key.size();
+                matched = true;
+            }
+
+            if (!matched)
+                return false;
+            out[written] = 0;
+            return true;
+        }
+
+        // Caller holds g_mutex.  Exact entries first, then templates
+        // narrow-to-wide, then the marked fragments (composition) - the most
+        // specific rule always gets the first say.
         bool LookupKeyLocked(const char* lowerKey, const char* original, char* out,
             size_t outSize)
         {
@@ -471,6 +556,9 @@ namespace translate
                 if (MatchTemplate(p, lowerKey, begin, end, kMaxWildcards, count))
                     return RenderTemplate(p, original, begin, end, count, out, outSize);
             }
+
+            if (!g_fragments.empty())
+                return ComposeFragments(lowerKey, original, out, outSize);
             return false;
         }
 
@@ -491,12 +579,18 @@ namespace translate
         // level the game prints without enumerating them.  The value uses '*' as
         // the placeholder for the captured text, in order.
         //
+        // A key starting with '~' marks a COMPOSABLE fragment: it is usable
+        // inside a longer run as well as on its own (see Fragment).  The marker
+        // is checked before the '*' test, so a marked entry can never be mistaken
+        // for a template, and the marker itself is never part of the key.
+        //
         // Parses into caller-owned tables (never the live ones): the parsing
         // happens outside g_mutex, and only the final publish is locked - same
         // rule as patch_config's loadfrom.
         LoadResult ParseDictionaryBuffer(const char* data, size_t size,
             std::unordered_map<std::string, std::string>& dict,
-            std::vector<WildPattern>& patterns)
+            std::vector<WildPattern>& patterns,
+            std::vector<Fragment>& fragments)
         {
             LoadResult result;
             if (!data || size == 0)
@@ -543,7 +637,31 @@ namespace translate
 
                 LowerInPlace(p); // keys are stored lower-cased; see LowerInPlace
 
-                if (strchr(p, '*'))
+                // The '~' marker turns an entry into a composable fragment (see
+                // Fragment).  It is stripped here, before anything else looks at
+                // the key, so no table ever holds the marker.  A marked key that
+                // is too short is dropped instead of loaded - it would fire
+                // inside unrelated words.
+                bool composable = false;
+                if (*p == '~')
+                {
+                    composable = true;
+                    ++p;
+                    while (*p == ' ' || *p == '\t')
+                        ++p;
+                    if (strlen(p) < kMinFragmentKey)
+                        continue; // typo, not a rule
+                }
+
+                if (composable)
+                {
+                    Fragment fragment;
+                    fragment.key = p;
+                    fragment.value = value;
+                    fragments.push_back(fragment);
+                    ++result.fragments;
+                }
+                else if (strchr(p, '*'))
                 {
                     WildPattern pattern;
                     const char* chunk = p;
@@ -575,9 +693,30 @@ namespace translate
             // Narrow templates first: fewer '*' means more literal text, which is
             // the more specific rule.  std::stable_sort keeps the file's order
             // between equally narrow templates.
+            //
+            // [LOCAL] Known limitation, deliberately NOT fixed - the owner's call
+            // (2026-09-18): "if the price cannot be translated, leave it, it does
+            // not hurt reading".  Specificity really means "how much literal text
+            // is pinned down", so a two-wildcard rule such as
+            //   hold ^3f^7 for ^3*^7 [cost: *]     (28 literal chars)
+            // is MORE specific than the one-wildcard
+            //   hold ^3f^7 for *                   (15 literal chars)
+            // - but this sort puts the latter first, and every template is matched
+            // against the whole run, so the first one swallows the runs the
+            // "[cost: *]" family was written for: that family can never fire and
+            // every price keeps a hand-written exact entry instead.  The owner
+            // accepted that, so this stays as it is - the fix, if it is ever
+            // wanted, is to compare total literal length (descending) first.
             std::stable_sort(patterns.begin(), patterns.end(),
                 [](const WildPattern& a, const WildPattern& b)
                 { return a.parts.size() < b.parts.size(); });
+
+            // Longest fragment first, for the same reason: at one position the
+            // longest key is the most specific rule.  Equal lengths keep the
+            // file's order, which keeps the outcome predictable.
+            std::stable_sort(fragments.begin(), fragments.end(),
+                [](const Fragment& a, const Fragment& b)
+                { return a.key.size() > b.key.size(); });
 
             return result;
         }
@@ -588,7 +727,8 @@ namespace translate
         // and this runs at most once per save, so the extra copy is free.
         LoadResult ParseDictionaryFile(const char* path,
             std::unordered_map<std::string, std::string>& dict,
-            std::vector<WildPattern>& patterns)
+            std::vector<WildPattern>& patterns,
+            std::vector<Fragment>& fragments)
         {
             LoadResult result;
 
@@ -603,7 +743,8 @@ namespace translate
                 blob.append(chunk, got);
             fclose(f);
 
-            return ParseDictionaryBuffer(blob.data(), blob.size(), dict, patterns);
+            return ParseDictionaryBuffer(blob.data(), blob.size(), dict, patterns,
+                fragments);
         }
 
         // Where the dictionary currently in force came from.  Worth logging: the
@@ -658,6 +799,16 @@ namespace translate
             return true;
         }
 
+        // Is this parse result worth publishing?  Entries are the normal case,
+        // but a dictionary may legitimately consist of templates or of the marked
+        // fragments alone.  What must NOT count as usable is an empty or corrupt
+        // file - that is what makes an emptied translate_zh.txt fall back to the
+        // copy inside the dll.
+        bool Usable(const LoadResult& r)
+        {
+            return r.entries + r.templates + r.fragments > 0;
+        }
+
         // Loads whichever dictionary should be in force and publishes it.
         //
         // The external file wins whenever it yields entries: it is the one the
@@ -672,13 +823,14 @@ namespace translate
         {
             std::unordered_map<std::string, std::string> dict;
             std::vector<WildPattern> patterns;
+            std::vector<Fragment> fragments;
             LoadResult result;
             source = DictSource::None;
 
             if (stamp != 0)
             {
-                result = ParseDictionaryFile(path, dict, patterns);
-                if (result.entries > 0)
+                result = ParseDictionaryFile(path, dict, patterns, fragments);
+                if (Usable(result))
                     source = DictSource::File;
             }
 
@@ -689,9 +841,10 @@ namespace translate
                 {
                     dict.clear();
                     patterns.clear();
+                    fragments.clear();
                     result = ParseDictionaryBuffer(builtin.data(), builtin.size(),
-                        dict, patterns);
-                    if (result.entries > 0)
+                        dict, patterns, fragments);
+                    if (Usable(result))
                         source = DictSource::Builtin;
                 }
             }
@@ -703,6 +856,7 @@ namespace translate
                 std::lock_guard<std::mutex> lock(g_mutex);
                 g_dict.swap(dict);
                 g_patterns.swap(patterns);
+                g_fragments.swap(fragments);
                 g_dictStamp = stamp;
                 g_enabled.store(true);
             }
@@ -749,11 +903,12 @@ namespace translate
             if (source == DictSource::None)
                 return; // nothing usable: the tables in force are left alone
 
-            Logf("dictionary reloaded (%s): %u entries, %u templates%s",
+            Logf("dictionary reloaded (%s): %u entries, %u templates, %u fragments%s",
                 source == DictSource::File
                     ? (forced ? "update applied" : "file changed")
                     : "fell back to the built-in default",
                 static_cast<unsigned>(result.entries), static_cast<unsigned>(result.templates),
+                static_cast<unsigned>(result.fragments),
                 result.tooLong ? " (some lines were too long and skipped)" : "");
         }
 
@@ -831,9 +986,9 @@ namespace translate
         }
 
         const bool wantTranslate = t7patch_cfg_translate_enabled();
-        const bool wantCollect = t7patch_cfg_dump_ui_strings();
+        const bool wantCollect = t7patch_cfg_dev_tools();
         // exchange, not load-then-store: the PREVIOUS collect flag is part of
-        // the change-detection key below, so a flipped dump_ui_strings still
+        // the change-detection key below, so a flipped dev_tools still
         // falls through to a real (re)load and gets its log line.
         const bool prevCollect = g_collect.exchange(wantCollect);
 
@@ -844,6 +999,7 @@ namespace translate
                 return; // already down - a config re-apply is a no-op, not news
             g_dict.clear();
             g_patterns.clear();
+            g_fragments.clear();
             g_dictStamp = 0;
             g_enabled.store(false);
             Logf("init: translate=0 (disabled by config)");
@@ -877,9 +1033,10 @@ namespace translate
         DictSource source = DictSource::None;
         const LoadResult result = LoadEffectiveDictionary(path, stamp, source);
 
-        Logf("init: translate=1, dictionary %s (%u entries, %u templates, collect=%d)",
+        Logf("init: translate=1, dictionary %s (%u entries, %u templates, %u fragments, collect=%d)",
             SourceName(source),
             static_cast<unsigned>(result.entries), static_cast<unsigned>(result.templates),
+            static_cast<unsigned>(result.fragments),
             wantCollect ? 1 : 0);
     }
 
@@ -1008,7 +1165,7 @@ namespace translate
         // Misses are deliberately NOT logged any more.  With the dictionary
         // settled they are pure noise - a dozen lines every launch saying "still
         // English" - and "which strings are still English in game" is what
-        // dump_ui_strings=1 answers properly, with counts and without guessing.
+        // dev_tools=1 answers properly, with counts and without guessing.
         static std::atomic<int> hits{ 0 };
         if (replaced && hits.fetch_add(1) < 5)
             Logf("hit: \"%s\" -> \"%s\"", firstHit, out);
