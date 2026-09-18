@@ -528,6 +528,10 @@ my showcase=我的展示
 #   `shangri-la`：灰机作「世外桃源」⇒ 按灰机优先改（原「香格里拉」虽是 Shangri-La 的通用中文，但定了灰机优先就跟着灰机）。
 shadows of evil=恶灵之影
 the giant=巨人
+# `Der Riese` = BO3 那张 `The Giant` 的**原版（WAW）德语名**（der Riese＝巨人）⇒ 直译「巨人」，与 `the giant` 口径一致。
+# （用户 2026-09-18 问过"为啥重返没翻译" ⇒ `Return to Verruckt` 已加整条；这一条是同一批补的。）
+# 本词无变音字母（Riese 全 ASCII）⇒ 不需要像 Verruckt 那样收多个拼写变体，一条足矣。
+der riese=巨人
 der eisendrache=钢铁之龙
 zetsubou no shima=绝望之岛
 gorod krovi=血狱之城
@@ -549,8 +553,22 @@ origins=起源
 #      `VERRÜCKT` = 56 45 52 52 **C3 9C** 43 4B 54（大写 Ü）→ 小写后是 `verrÜckt`（键里 Ü 保持大写！）
 #      `Verrückt` = 56 65 72 72 **C3 BC** 63 6B 74（小写 ü）→ 小写后是 `verrückt`
 #    ⇒ 少了任何一条，选图列表里就有一处仍是英文。这是本词库**第一例非 ASCII 键**。
+#   · ⚠️ **ASCII 拼写也必须收（2026-09-18 补）**：不少 mod / 工坊作者不打德语分音符，直接写 `verruckt` ⇒
+#     上面两个变体都匹配不到（`verruckt` 全 ASCII 与 `verrückt`(C3 BC) 是**不同字节、不同键**，并存不报重复）。
+#     实测症状：换 UI 的 mod 显示「疯狂」是命中了的，但同一个包里 `RETURN TO VERRUCKT` 这类全 ASCII 标题翻不出来。
 verrÜckt=疯狂
 verrückt=疯狂
+verruckt=疯狂
+# 工坊图「Verruckt 重制版」的标题 ⇒ **整条译名**（`Return to`=重返 ＋ 既有 `verruckt=疯狂`，不是新造叫法）。
+# ⚠️ 这是**精确条目**：只认整串 `Return to Verruckt`，不会波及别的含该词的句子 —— 工坊地图名本身
+# 仍按既有策略保留原文（见文件下方"工坊地图名"那条注释）。
+# ⚠️ 同一个标题**三种拼写都收**（作者写法不一，字典逐字节匹配，漏一种就是漏翻）：全 ASCII `verruckt` /
+# 小写分音符 `verrückt`(C3 BC) / 大写分音符 `verrÜckt`(C3 9C)。
+# 实测依据：**采集文件 `ui_dump.txt` 里抠出来的 run 是 `\x15Return to Verruckt\x14`（全 ASCII）**，
+# 而官方图名的两种是带分音符的（`VERRÜCKT` / `Verrückt`）⇒ 两个来源都在用，故三种并存。
+return to verruckt=重返疯狂
+return to verrückt=重返疯狂
+return to verrÜckt=重返疯狂
 nuketown zombies=僵尸核弹镇
 die rise=死亡高楼
 morg city, usa=美国莫格城
@@ -647,6 +665,12 @@ restart level=重新开始关卡
 start menu=开始菜单
 game over=游戏结束
 ~end game=结束游戏
+# mod 自定义的暂停菜单项（2026-09-18，用户截图反馈 `MAP RESTART` / `FAST RESTART` 未翻；同一菜单里
+# 「结束游戏」是我们的 `~end game`，而「回到游戏」是 mod 自带的中文 ⇒ 只有这两项缺）。
+# ⚠️ 这两项**不是 BO3 官方菜单**（官方只有 Resume/Restart/Quit）⇒ 查不到"官方中文" ⇒ 按直译，
+# 与既有 `end game=结束游戏` 的风格对齐。
+~map restart=重开地图
+~fast restart=快速重启
 match begins in=比赛即将开始
 low ammo=弹药不足
 no ammo=无弹药
@@ -1186,6 +1210,20 @@ hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
 ~upgrade 1: faster reload replenish=升级 1：更快的换弹补给
 ~upgrade 2: faster reload replenish=升级 2：更快的换弹补给
 ~faster reload replenish=更快的换弹补给
+# ── 作品名 / 通用 UI 标签（2026-09-18 加）：用户装了换 UI 的 mod，实测「地图选择界面」上
+# 这几个标签**全都没命中**（同一界面里 `亡者之夜` / `疯狂` / `死亡沼泽` 是命中的 ⇒ 通道没问题，纯缺词）。
+# 来源：作品名 = 官方/通行中文（《使命召唤：战争世界》见百度百科·搜狗百科）；UI 词 = 词库**既有译文**
+# 里就在用（`自定义地图`、`随机`），此处只是把它们提成可独立命中的片段，不是新造译法。
+# ⚠️ 罗马数字口径与词库既有的「黑色行动 III」保持一致（**不写**「黑色行动 3」）；`black ops ii/iii`
+# 必须排在 `black ops` 之前 ⇒ 靠片段机制的「最长优先」自动保证，这里顺序只求可读。
+# ⚠️ **`black ops iii` 词库里本来就有**（既有片段，`Call of Duty: Black Ops III` 靠它命中）⇒
+# **不要再加一条**（`dict_verify` 会报重复键，实测踩过一次）；`black ops 3`（阿拉伯数字）也是既有条目。
+~world at war=战争世界
+~black ops ii=黑色行动 II
+~black ops=黑色行动
+~custom maps=自定义地图
+~favorites=收藏
+~random=随机
 ~ammo mod=弹药模组
 # 2026-09-18（用户要求核对译名，别直接沿用"保留原文"）。★**查证只走网络**（用户明确："不要去翻游戏本地
 # 你查不到的，直接从网络查询" —— 官方语言包是压缩的，字节搜 189 个文件零命中，纯浪费时间）。
@@ -1215,6 +1253,10 @@ hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
 # （「an Ammo Mod featured in Black Ops 6 and Black Ops 7」）↔ BO7 官方简中表的「暗影裂缝」
 # （BO6/BO7 里的唯一"裂缝"类）⇒ 对应成立。BO3 本身没有它，但 mod 会引用后续作的弹药名。
 ~shadow rift=暗影裂缝
+# 按"创意工坊口径"新规则补（用户 2026-09-18）：这两条在灰机 `Alternate_Ammo_Type` 里**只有英文、没有中文**
+# ⇒ 直译且不偏颇 ⇒ 收录。⚠️ 同为后续作的 `Kill-O-Watt`（kilowatt＋kill 双关）**保留原文** —— 谐音梗译不出就不硬译。
+~light mend=光明愈合
+~shatter blast=碎裂冲击
 # Fire Works ⇒ **爆裂焰火**。⚠️ 注意拼写：BO3 原文是**两个词** `Fire Works`（不是 `Fireworks`）——
 # 键必须按原文写。它是 **BO3 首发 5 种弹药之一**，并在 **BO7 回归**（Fandom `Alternate_Ammo_Type`：
 # BO7 = BO6 的 7 种 + 回归的 Fire Works）⇒ BO7 官方简中表里的「爆裂焰火」正是它 ⇒ 中英对应成立。
@@ -1317,6 +1359,38 @@ $(lobbyfriends.onlinecount) playing black ops 3=$(lobbyFriends.onlineCount) 人�
 #    · B站 —— 按英文原名搜拿不到样本（不硬凑）。
 ~winter's howl=冬日嚎叫
 ~always done swiftly=快如既往
+# ★ 泡泡糖译名的**权威来源 = 灰机 `GobbleGum(ZM)` 页**（2026-09-18 确认）：既有条目「快如既往 / 壁力惊人 /
+# 慌不择路！ / 特长狂 / 凤凰涅槃 / 斜眼废物 / 杀戮快感 / 免费招待 / 好处均摊」等**与该页逐条一致** ⇒
+# 当年这批译名就是照它定的 ⇒ **新泡泡糖条目一律先查该页**，不要自己意译。
+~nowhere but there=雷霆救兵
+# ── 泡泡糖「全量补齐」（2026-09-18，用户："直接从网上获取所有的泡泡糖加入词库"）─────────────
+# 来源 = **灰机 `GobbleGum(ZM)` 页**（BO3 经典/高级/稀有-高级/究极-高级 ＋ BO6 全套，带品质标注）。
+# 比对结果：该页 76 条里词库已覆盖 61 条 ⇒ **本轮补 12 条**（全是 BO6 新增或回归的）。三条刻意不动：
+#   · `who's keeping score?`（**带问号**）与 `round robbin'`（**带撇号**）词库早有 —— 按无标点写法查会误判成"缺"；
+#   · **`Cache Back` 有意保留原文**（灰机的「凯申物流」是网络梗，前次已判定跳过，见上方注释）。
+~shields up=盾牌快递
+~power keg=桶装强化
+~exit strategy=脱离战略
+~free fire=火力全开
+~dead drop=亡者馈赠
+~wall to wall clearance=墙墙减价
+~modified chaos=改造混乱
+~wonderbar!=完美！
+~hidden power=隐藏力量
+~indigestion=消化不良
+~holiday cheer=节日庆祝
+# ★★ 规则更新（用户 2026-09-18）——"创意工坊口径"：**作者自创的名字只要能译且不偏颇就直接译**，
+# 不再要求"必须有官方/权威中文来源"；**无法直译的（谐音梗/自造词）依旧不管**。
+# 以下 3 条是「泡泡糖包」界面上灰机查无此条的名字（疑似来自 BO4 灵药体系，无中文来源）⇒ 按新规则直译：
+#   Point Drops    = 点数掉落（效果即"击杀掉落点数"，直白不偏颇）
+#   Bearly Alive   = 苟延残喘（谐音 barely alive；中文无法同时保留 bear 的熊梗 ⇒ 只译含义，不算偏颇）
+#   Play It Again Sam = 再来一次，山姆（《卡萨布兰卡》台词梗，直译即可）
+~point drops=点数掉落
+~bearly alive=苟延残喘
+~play it again sam=再来一次，山姆
+# ⚠️ `Time Out` **不能做片段**：`~time out` 会把「connection time out」这类通用短语也吃成"暂时休战" ⇒
+# 改成**精确条目**（只在整串恰为 `Time Out` 时命中，正好对上泡泡糖 UI 的独立显示方式）。
+time out=暂时休战
 ~in plain sight=熟视无睹
 ~arms grace=优雅武装
 ~stock option=自动补给
@@ -1453,7 +1527,7 @@ mass-energy equivalence, secret tests, crash-landing perks. survive in the iconi
 [h3]deep inside a child's mind, our four hero's attempt to escape the dark and secret past within her dreams.[/h3]=[h3]在孩童意识的深处，四位英雄试图逃离她梦境里那段黑暗而隐秘的过往。[/h3]
 this map is still a work in progress and has some bugs i need to fix, but i'd like feedback a=这张地图仍在制作中，还有些我得修的 bug，不过我很希望能收到反馈……
 watch your step! fight for survival atop the towers of doom, where dizzying heights and the relentless undead make a deadly combination.=小心脚下！在末日高塔之巅为生存而战——令人眩晕的高度加上无穷无尽的尸潮，是致命的组合。
-this is a small remaster of verruckt trying to emulate the feeling of classic zombies like waw and bo1. the courtyard and some outside parts are now playable.=这是「疯狂」的小型重制版，力求还原《战火世界》与《黑色行动 1》那种经典僵尸手感。现在庭院与部分室外区域也能游玩了。
+this is a small remaster of verruckt trying to emulate the feeling of classic zombies like waw and bo1. the courtyard and some outside parts are now playable.=这是「疯狂」的小型重制版，力求还原《战争世界》与《黑色行动 1》那种经典僵尸手感。现在庭院与部分室外区域也能游玩了。
 
 # ═══ MOD：奖励点道具的方括号说明（2026-09-18 采集补入）═══
 # 同一张 workshop 地图的「奖励点」里，每件道具下方那行用 `[^3…^7]` 包起来的说明。四条都以
@@ -1468,6 +1542,10 @@ this is a small remaster of verruckt trying to emulate the feeling of classic zo
 # ═══ MOD：任务 / 界面提示（2026-09-18 晚 第二采集批）═══
 # 采集更新（6106 → 6202 行）后 triage 工作清单里**真正该翻**的 9 条；其余候选是玩家名 / 聊天 /
 # 工坊地图名（ADLERSTADT / NIGHTMARE / STANDBY / Return to Verruckt 等）⇒ 按既有策略一律保留原文。
+# ⚠️ 2026-09-18 用户问过「为啥重返没翻译」⇒ 解释：这是**刻意策略**（作者起的专名，玩家按英文找图/订阅，
+# 且 ADLERSTADT(德语"鹰之城") / STANDBY 这类**没有权威中文**）。**唯一例外** = `Return to Verruckt`：
+# 它含官方图名 Verruckt（词库已有 `verruckt=疯狂`），且用户明确要 ⇒ 已在 Verruckt 条目处加**整条**译名
+# `return to verruckt=重返疯狂`（精确条目，不影响其它串）。
 # 措辞尽量与既有条目对齐：checkpoints=检查点、elevator is active=电梯已启动、infection=感染、
 # max ammos refill your clip as well.=「最大弹药」、build your mod stack=构建你的模组栈。
 checkpoint reached=抵达检查点
