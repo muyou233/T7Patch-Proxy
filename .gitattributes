@@ -1,0 +1,32 @@
+# 编码 / 行尾统一（2026-09-18 建立）
+#
+# 规则：**所有文本文件 = UTF-8（无 BOM）+ LF 行尾**；二进制不做任何转换。
+# 为什么用 .gitattributes 而不是改 core.autocrlf：git config 不动（安全约定），
+# attributes 的优先级高于 core.autocrlf，能直接止住"LF will be replaced by CRLF"
+# 警告与"文件显示已改、diff 却是空的"幻影状态。
+#
+# 校验方式：python .codebuddy\ref\encoding_audit.py
+# （硬约束 = src/ proxy/ translate/ 工程文件 README 工具脚本 skill memory；
+#   软约束 = .codebuddy 下 PowerShell 写的日志，允许 BOM，只报告不追究。）
+* text=auto eol=lf
+
+# 词库：T7Patch 的读取器按 LF 切行，且必须是 UTF-8 —— 显式钉死
+translate/*.txt   text eol=lf
+*.txt             text eol=lf
+
+# 二进制：禁止任何行尾/编码转换
+*.dll    binary
+*.exe    binary
+*.lib    binary
+*.obj    binary
+*.pdb    binary
+*.ico    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.zip    binary
+*.7z     binary
+*.xpak   binary
+*.ff     binary
+*.bak    binary
