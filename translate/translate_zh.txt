@@ -1187,6 +1187,55 @@ hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
 ~upgrade 2: faster reload replenish=升级 2：更快的换弹补给
 ~faster reload replenish=更快的换弹补给
 ~ammo mod=弹药模组
+# 2026-09-18（用户要求核对译名，别直接沿用"保留原文"）。★**查证只走网络**（用户明确："不要去翻游戏本地
+# 你查不到的，直接从网络查询" —— 官方语言包是压缩的，字节搜 189 个文件零命中，纯浪费时间）。
+# 规则顺序 = 官方中文 > Fandom 中文 > 灰机 > B站，本次逐层走完（**用户要求"把查到的都写进词库"**）：
+#   ── 来源 A：**BO7 官方简中「6 种弹药特效」**（3DM 转载官方攻略页）＝ 爆裂焰火 / 大脑腐化 / 凝固汽油弹 /
+#      暗影裂缝 / 致命电流 / 急速冰冻。其中 4 条能对到英文（同一机制沿用名 ⇒ 本作与后续作通用）：
+#   ── 来源 B：灰机 `Napalm_Burst(ZMAmmo)` 页原文＝「高能炉(Blast Furnace) / 焰火炸弹(Fire Bomb) /
+#      凝固汽油(Napalm Burst)」（灰机站内搜 `ZMAmmo` 只命中这一页，其余专名页全空）。
+#   Blast Furnace ⇒ **高能炉**（B）
+#   Thunder Wall  ⇒ **雷墙**（用户确认的官方简中 —— 网络三层全空：Fandom 中文空页 / 灰机空页 / B站无任何
+#                   COD 相关内容，但用户玩中文版直接给出）★**教训：专名查不到就直接问用户**，他手上的
+#                   官方中文比任何 wiki 都准且零成本；别为一个词连查好几轮，更不许自己编（编了就是错译）。
+#   Dead Wire     ⇒ **致命电流**（A）
+#   Brain Rot     ⇒ **大脑腐化**（A；效果"将敌人暂时转化为盟友"）
+#   Cryofreeze    ⇒ **急速冰冻**（A）
+#   Napalm Burst  ⇒ **凝固汽油弹**（A 官方优先于 B 灰机的旧写法"凝固汽油"）
+#   Fire Bomb     ⇒ **焰火炸弹**（B，唯一来源）
+#   ⚠️ A 表里的「爆裂焰火」「暗影裂缝」**查不到对应英文原名** ⇒ **不收录**（不许把中文硬套给某个英文词）。
+~blast furnace=高能炉
+~dead wire=致命电流
+~thunder wall=雷墙
+~brain rot=大脑腐化
+~cryofreeze=急速冰冻
+~napalm burst=凝固汽油弹
+~fire bomb=焰火炸弹
+# Shadow Rift ⇒ **暗影裂缝**（BO6 / BO7 的弹药模组）。英文名 = Fandom 独立条目 `Shadow Rift`
+# （「an Ammo Mod featured in Black Ops 6 and Black Ops 7」）↔ BO7 官方简中表的「暗影裂缝」
+# （BO6/BO7 里的唯一"裂缝"类）⇒ 对应成立。BO3 本身没有它，但 mod 会引用后续作的弹药名。
+~shadow rift=暗影裂缝
+# Fire Works ⇒ **爆裂焰火**。⚠️ 注意拼写：BO3 原文是**两个词** `Fire Works`（不是 `Fireworks`）——
+# 键必须按原文写。它是 **BO3 首发 5 种弹药之一**，并在 **BO7 回归**（Fandom `Alternate_Ammo_Type`：
+# BO7 = BO6 的 7 种 + 回归的 Fire Works）⇒ BO7 官方简中表里的「爆裂焰火」正是它 ⇒ 中英对应成立。
+# BO3 的 5 种完整清单（Fandom）：Blast Furnace / **Fire Works** / **Turned** / Dead Wire / Thunder Wall。
+~fire works=爆裂焰火
+# Cryo Freeze ⇒ **急速冰冻**。⚠️ 拼写两版并存：BO4 写作 `Cryofreeze`（一个词），冷战后各作写作
+# `Cryo Freeze`（两个词）⇒ **两个键都收**（字典是精确/子串匹配，少一个就漏）。
+~cryo freeze=急速冰冻
+# ── 奇迹武器 / 彩蛋武器（BO3 用得最多；用户 2026-09-18 要求预置）───────────────────────────
+# 来源逐条标注；**片段的"最长优先"会保证 `~ray gun mark ii` 先于 `~ray gun` 命中**。
+# Ray Gun ⇒ **射线枪**（百度百科 / 灰机 `Ray_Gun(奇迹武器)` 条目标题）。Ray Gun Mark II（BO7 复出被译
+# ≈「二代射线枪」，同一命名延续）⇒ 两词拼写按 BO 原文。
+~ray gun mark ii=二代射线枪
+~ray gun=射线枪
+# Wunderwaffe DG-2 ⇒ **超级武器DG-2** —— ★**BO3 官方简中**的写法（百度百科原话："在使命召唤-黑色行动3的
+# 官方简中版称为'超级武器DG-2'"）⇒ 优先级最高（官方 > 社区惯用的"奇迹武器DG-2"）。
+~wunderwaffe dg-2=超级武器DG-2
+# Thundergun ⇒ **迅雷炮**（Fandom 中文站 `Thundergun (奇迹武器)` 条目正文用语）。
+~thundergun=迅雷炮
+# Ragnarok DG-4 ⇒ **诸神黄昏DG-4**（Fandom 中文站条目页名原文）。
+~ragnarok dg-4=诸神黄昏DG-4
 ~faster ads & weapon swapping=更快的开镜与切枪
 ~friendly maxis drone=友方 Maxis 无人机
 ~juggernog=厚血蛋奶酒
