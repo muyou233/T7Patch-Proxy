@@ -169,8 +169,8 @@ int t7patch_menu_key();          // virtual-key code that toggles the overlay (d
 int t7patch_cfg_menu_lang();     // overlay language: 1 = Chinese (default), 0 = English
 void t7patch_cfg_set_menu_lang(int value);
 // [LOCAL] UI translation layer (src/translate.cpp): replace English UI text with
-// the dictionary in T7Patch\translate_zh.txt; the second switch collects the
-// distinct English strings into T7Patch\ui_dump.txt for building it.
+// the dictionary in T7Patch\translate_zh.txt; the development-tools switch collects
+// the distinct English strings into T7Patch\ui_dump.txt (dev tool: no overlay entry).
 bool t7patch_cfg_translate_enabled();
 void t7patch_cfg_set_translate(int enabled);
 void t7patch_cfg_block_translate(int blocked); // start-up language gate latch (Protection.cpp)
@@ -185,7 +185,7 @@ bool t7patch_cfg_skip_pvp();
 void t7patch_cfg_set_skip_pvp(int skip);
 bool t7patch_cfg_skip_zm();
 void t7patch_cfg_set_skip_zm(int skip);
-bool t7patch_cfg_dump_ui_strings();
+bool t7patch_cfg_dev_tools();
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start
 void t7patch_cfg_set_menu_auto_open(bool v); // menu-side auto-open switch

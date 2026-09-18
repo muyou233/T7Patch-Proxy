@@ -781,7 +781,7 @@ struct patch_config
         K_MENU_AUTO_OPEN = 1u << 5,
         K_MENU_LANG = 1u << 6,
         K_TRANSLATE = 1u << 7,
-        K_DUMP_UI_STRINGS = 1u << 8,
+        K_DEV_TOOLS = 1u << 8,
         K_SKIP_PVP = 1u << 9,
         K_SKIP_ZM = 1u << 10,
         K_ALL = (1u << 11) - 1,
@@ -815,10 +815,14 @@ struct patch_config
     int menu_lang;
     // [LOCAL] UI translation layer (src/translate.cpp): 1 = replace English UI
     // text with the dictionary in T7Patch\translate_zh.txt, 0 = off (default).
-    // The second switch turns on collection mode, which records every distinct
-    // English UI string into T7Patch\ui_dump.txt for building that dictionary.
+    // The second switch is the DEVELOPMENT TOOLS one: it turns on collection
+    // mode, which records every distinct English UI string into
+    // T7Patch\ui_dump.txt.  That file is the input for dictionary work AND for
+    // the fragment-candidate pass (.codebuddy\ref\dev_pipeline.py), which reads
+    // this same key out of t7patch.conf - one switch, both ends.  Deliberately
+    // NOT in the overlay menu: it is a development tool, not a player setting.
     int translate;
-    int dump_ui_strings;
+    int dev_tools;
     // [LOCAL] Per-scene exceptions to 'translate' - both read as "this scene
     // stays untranslated", so the two switches in the menu are worded the same
     // way and a third scene would slot in without changing the shape.
@@ -862,7 +866,7 @@ struct patch_config
         int menu_auto_open;
         int menu_lang;
         int translate;
-        int dump_ui_strings;
+        int dev_tools;
         int skip_pvp;
         int skip_zm;
         unsigned keys_seen;
@@ -883,7 +887,7 @@ struct patch_config
         menu_auto_open = 1; // auto-open on the main menu (user default)
         menu_lang = 1;      // Chinese by default
         translate = 0;      // translation off unless asked for
-        dump_ui_strings = 0;
+        dev_tools = 0;
         skip_pvp = 1;       // ...and a Multiplayer match is the one scene it stays off in
         skip_zm = 0;        // Zombies is translated like everything else
         keys_seen = 0;      // nothing read from a file yet
@@ -909,7 +913,7 @@ struct patch_config
         v.menu_auto_open = menu_auto_open;
         v.menu_lang = menu_lang;
         v.translate = translate;
-        v.dump_ui_strings = dump_ui_strings;
+        v.dev_tools = dev_tools;
         v.skip_pvp = skip_pvp;
         v.skip_zm = skip_zm;
         v.keys_seen = keys_seen;
@@ -925,7 +929,7 @@ struct patch_config
         menu_auto_open = v.menu_auto_open;
         menu_lang = v.menu_lang;
         translate = v.translate;
-        dump_ui_strings = v.dump_ui_strings;
+        dev_tools = v.dev_tools;
         skip_pvp = v.skip_pvp;
         skip_zm = v.skip_zm;
         keys_seen = v.keys_seen;
@@ -1052,8 +1056,8 @@ struct patch_config
         outfile << "skip_zm=" << v.skip_zm << std::endl;
         outfile << std::endl;
 
-        outfile << "# 采集界面英文文本到 T7Patch\\ui_dump.txt（做词库用）1/0开启关闭" << std::endl;
-        outfile << "dump_ui_strings=" << v.dump_ui_strings << std::endl;
+        outfile << "# 开发工具模式：采集界面英文文本到 T7Patch\\ui_dump.txt（做词库 / 片段候选发现用；采集后跑 .codebuddy\\ref\\dev_pipeline.py 出清单）1/0开启关闭" << std::endl;
+        outfile << "dev_tools=" << v.dev_tools << std::endl;
         outfile << std::endl;
 
         outfile.close();
@@ -1253,15 +1257,36 @@ struct patch_config
                 }
             }
             break;
-            case FNV32("dump_ui_strings"):
+            case FNV32("dev_tools"):
             {
-                v.keys_seen |= K_DUMP_UI_STRINGS;
+                v.keys_seen |= K_DEV_TOOLS;
                 std::istringstream ivalread(val);
-                ivalread >> v.dump_ui_strings;
+                ivalread >> v.dev_tools;
                 if (ivalread.fail())
                 {
-                    v.dump_ui_strings = 0; // default: off
+                    v.dev_tools = 0; // default: off
                 }
+            }
+            break;
+            // [LOCAL] The same switch under its pre-2026-09-18 name.  It is read
+            // - so an existing t7patch.conf keeps collecting instead of going
+            // quiet - but it deliberately does NOT raise K_DEV_TOOLS: leaving
+            // keys_seen short of K_ALL is what makes load_settings_initial()
+            // rewrite the file once, migrating the value onto the new key name.
+            case FNV32("dump_ui_strings"):
+            {
+                std::istringstream ivalread(val);
+                ivalread >> v.dev_tools;
+                if (ivalread.fail())
+                {
+                    v.dev_tools = 0; // default: off
+                }
+                // Deliberately no log line from here: this parser IS the config
+                // layer, and the rewrite that carries the migration is already
+                // reported by load_settings_initial() ("config file was in an
+                // older format (...) - rewritten in the current format").  The
+                // other half of the evidence is the file itself: after one run
+                // it reads dev_tools=1 and no longer mentions the old name.
             }
             break;
             case FNV32("skip_pvp"):
@@ -1409,10 +1434,10 @@ bool t7patch_cfg_translate_enabled()
     return !g_translate_language_block.load() && user_config.translate != 0;
 }
 
-bool t7patch_cfg_dump_ui_strings()
+bool t7patch_cfg_dev_tools()
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
-    return user_config.dump_ui_strings != 0;
+    return user_config.dev_tools != 0;
 }
 
 // [LOCAL] Per-scene exceptions to the translation layer - see framework.h.
