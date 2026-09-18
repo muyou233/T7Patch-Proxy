@@ -540,6 +540,117 @@ namespace hooks {
 			return qmemcpy(dest, source, size);
 		}
 
+		// [LOCAL] 第三条字符串通道：HUD / LUI 的**文字绘制出口** —— 它既做观察，也做翻译。
+		// 为什么要有它：现有两条 hook（SEH_ReplaceDirectiveInStringWithBinding 与
+		// UI_DoModelStringReplacement）覆盖的是**前端**字符串管线；而功能性 mod 在对局里画的字
+		// （`Hold ^3F^7 for ...` 交互提示、`^BBUTTON_PURCHASABLE_ICON^ X` 道具名、地图描述）
+		// 不经过它们 —— 实测一局 64 条 distinct 里 **55 条（86%）** 在 ui_dump.txt 里 0 命中。
+		// UI_Interface_DrawText 的签名里有 luiElement + luaVM，说明它画的正是脚本(Lua)驱动的 HUD 文本。
+		//
+		// 翻译方式（write-through）：**不写调用方的 buffer**（它的容量未知，直写有溢出的风险），
+		// 而是翻译命中时把**我们自己的**串传给原函数 —— 引擎只读它，我们不动别人的内存。
+		// 缓冲用每线程环形：① 生命周期覆盖整次调用；② 万一引擎不是立即拷贝而是暂存了指针，
+		// 环上的旧内容至少还是前几次的真实译文（单一静态缓冲会让所有滞留文本都变成最后一条）。
+		//
+		// 观察（dev_tools）：只记不改，且**先画完再记**。热路径纪律：绘制调用每帧成百次 ⇒
+		// 先做最便宜的判断（长度/空格/ASCII），再谈去重与写日志，同一个串只记一次、且有上限。
+		constexpr int kDrawnTextLogMax = 1024;
+		constexpr int kDrawnTextTranslateMax = 1536;
+		constexpr int kDrawnTextRingCount = 8;
+		std::atomic<bool> g_drawnTextLog{ false };
+		unsigned long long g_drawnTextGateMs = 0;
+		int g_drawnTextSeenCount = 0;
+		char g_drawnTextStorage[kDrawnTextLogMax][128]{};
+		thread_local char g_drawnTextRing[kDrawnTextRingCount][kDrawnTextTranslateMax]{};
+		thread_local int g_drawnTextRingNext = 0;
+
+		// 开关沿用 dev_tools（与采集同一个开关）。conf 读取带锁 ⇒ 热路径上最多每秒读一次并缓存。
+		bool DrawnTextProbeEnabled()
+		{
+			const unsigned long long now = GetTickCount64();
+			if (now - g_drawnTextGateMs >= 1000)
+			{
+				g_drawnTextGateMs = now;
+				g_drawnTextLog = t7patch_cfg_dev_tools();
+			}
+			return g_drawnTextLog.load();
+		}
+
+		// 只认「像界面句子」的串：≥8 字节、含空格、含拉丁字母、且一个非 ASCII 都没有
+		// （中文是我们自己的译文；数字/符号/单 token 不是界面文案）。宁可漏报，不在热路径上做重活。
+		bool LooksLikeUiSentence(const char* text)
+		{
+			if (!text || !text[0])
+				return false;
+
+			size_t n = 0;
+			bool space = false;
+			bool letter = false;
+			for (const char* p = text; *p && n < 120; ++p, ++n)
+			{
+				const unsigned char c = static_cast<unsigned char>(*p);
+				if (c >= 0x80)
+					return false;
+				if (c == ' ')
+					space = true;
+				else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+					letter = true;
+			}
+			return n >= 8 && space && letter;
+		}
+
+		void LogDrawnText(const char* text)
+		{
+			if (g_drawnTextSeenCount >= kDrawnTextLogMax)
+				return;
+
+			// 去重必须拿**将要存下来的那一份**去比：原串可能超过 128 字节、会在这里被截断，
+			// 拿截断副本与完整原串 strcmp 永远不会相等 ⇒ 长串每次绘制都记一条
+			// （实测：一条地图描述在 1.2 秒里刷了 33 条，长度全是 127）。
+			char key[sizeof(g_drawnTextStorage[0])]{};
+			strncpy_s(key, sizeof(key), text, _TRUNCATE);
+
+			for (int i = 0; i < g_drawnTextSeenCount; ++i)
+			{
+				if (strcmp(g_drawnTextStorage[i], key) == 0)
+					return;
+			}
+
+			strcpy_s(g_drawnTextStorage[g_drawnTextSeenCount],
+				sizeof(g_drawnTextStorage[0]), key);
+			++g_drawnTextSeenCount;
+
+			char msg[192]{};
+			snprintf(msg, sizeof(msg), "drawtext %s", g_drawnTextStorage[g_drawnTextSeenCount - 1]);
+			overlay::DebugLog(msg);
+		}
+
+		// [LOCAL] 签名照抄上游 Feb 2026 偏移仓库：15 个参数、__fastcall，明文串是第 10 个参数
+		// （char* text）。少一个参数或类型写错都会让调用者栈错位。
+		void __fastcall hkUI_Interface_DrawText(unsigned int localClientNum, __int64* luiElement,
+			float xPos, float yPos, unsigned int R, unsigned int G, unsigned int B, unsigned int A,
+			char flags, char* text, __int64 font, float fontHeight, float wrapWidth, float alignment,
+			char luaVM, __int64* element)
+		{
+			// 翻译（write-through）：命中时把**我们自己的**串传下去；未开、未命中或放不下 ⇒ 原串照旧。
+			// 门控用的是 translate::Enabled()，和其它两条 hook 完全一致（含「模组汉化」开关与场景门）。
+			char* outgoing = text;
+			if (text && text[0] && translate::Enabled())
+			{
+				char* slot = g_drawnTextRing[g_drawnTextRingNext];
+				g_drawnTextRingNext = (g_drawnTextRingNext + 1) % kDrawnTextRingCount;
+				if (translate::Lookup(text, slot, kDrawnTextTranslateMax))
+					outgoing = slot;
+			}
+
+			UI_Interface_DrawText(localClientNum, luiElement, xPos, yPos, R, G, B, A, flags,
+				outgoing, font, fontHeight, wrapWidth, alignment, luaVM, element);
+
+			// 先画完再记：观察不应该对画面产生任何影响。
+			if (text && DrawnTextProbeEnabled() && LooksLikeUiSentence(text))
+				LogDrawnText(text);
+		}
+
 		bool hkUI_DoModelStringReplacement(__int32 controllerIndex, char* element, const char* source, char* dest, unsigned int destSize)
 		{
 			// [LOCAL] The two guards its twin, hkSEH_ReplaceDirectiveInString-
@@ -1259,6 +1370,11 @@ namespace hooks {
 		MH_CreateHook((LPVOID)REBASE(0x1E724A0), functions::hkLiveInvites_SendJoinInfo, (LPVOID*)&LiveInvites_SendJoinInfo);
 		MH_CreateHook((LPVOID)REBASE(0x1E72040), functions::hkLiveInvites_JoinMessageAction, (LPVOID*)&LiveInvites_JoinMessageAction);
 		MH_CreateHook((LPVOID)REBASE(0x1EA4E30), functions::hkUI_BrowserOpen, (LPVOID*)&UI_BrowserOpen);
+		// [LOCAL] 第三条字符串通道探针（见 LogDrawnText 上方说明）：HUD / LUI 文字绘制出口。
+		// 只在 bo3::address() 认得出来的 build 上安装 —— 未知 build 会拿到 February 的 RVA，
+		// 那等于挂到错误的指令上（后果是崩游戏，不是记错一行日志）。本机指纹 = September2026。
+		if (bo3::current_build() != bo3::Build::Unknown)
+			MH_CreateHook((LPVOID)REBASE(0x1F28860), functions::hkUI_Interface_DrawText, (LPVOID*)&UI_Interface_DrawText);
 		/*MH_CreateHook((LPVOID)REBASE(0xA7DE0), functions::hkBG_Cache_GetScriptMenuNameForIndex, (LPVOID*)&BG_Cache_GetScriptMenuNameForIndex);
 		MH_CreateHook((LPVOID)REBASE(0xA78A0), functions::hkBG_Cache_GetEventStringNameForIndex, (LPVOID*)&BG_Cache_GetEventStringNameForIndex);
 		MH_CreateHook((LPVOID)REBASE(0xA7AB0), functions::hkBG_Cache_GetLocStringNameForIndex, (LPVOID*)&BG_Cache_GetLocStringNameForIndex);

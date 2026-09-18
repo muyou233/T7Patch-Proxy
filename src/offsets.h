@@ -112,6 +112,12 @@ const static auto ExecLuaCMD = reinterpret_cast<void(__fastcall*)()>OFFSET(0x1EF
 const static auto SEH_ReplaceDirectiveInStringWithBinding = reinterpret_cast<const char* (__fastcall*)(int localClientNum, const char* translatedString, char* finalString)>OFFSET(0x221CE90);
 const static auto qmemcpy = reinterpret_cast<__int64(__fastcall*)(char* dest, char* source, __int32 size)>OFFSET(0x2BC4EB0);
 const static auto UI_DoModelStringReplacement = reinterpret_cast<bool(__fastcall*)(__int32 controllerIndex, char* element, const char* source, char* dest, unsigned int destSize)>OFFSET(0x1F27400);
+// [LOCAL] HUD / LUI 文字绘制出口 —— 我们那两条字符串 hook **看不到**的一条通道。
+// 来源：上游 `Scroptss/T7-Offsets`（Feb 2026），RVA 按上游原值写，bo3::address() 会按当前
+// build 自动做 September 的 -0x6C0 换算。参数里的 `luiElement` / `luaVM` 说明它画的就是
+// 脚本(Lua)驱动的 HUD 文本 —— 奖励横幅那种"功能性 mod 用脚本画的字"应该走这里。
+// ⚠️ 签名 15 个参数、`__fastcall`，一个都不能少/错（错了压栈就乱）。
+const static auto UI_Interface_DrawText = reinterpret_cast<void(__fastcall*)(unsigned int localClientNum, __int64* luiElement, float xPos, float yPos, unsigned int R, unsigned int G, unsigned int B, unsigned int A, char flags, char* text, __int64 font, float fontHeight, float wrapWidth, float alignment, char luaVM, __int64* element)>OFFSET(0x1F28860);
 const static auto LobbyTypes_GetMsgTypeName = reinterpret_cast<const char* (__fastcall*)(__int32 index)>OFFSET(0x1EDFA60);
 const static auto LobbyMsgRW_PrepWriteMsg = reinterpret_cast<bool(__fastcall*)(__int64 lobbyMsg, __int64 data, int length, int msgType)>OFFSET(0x1EEA560);
 const static auto LobbyMsgRW_PrepReadMsg = reinterpret_cast<bool(__fastcall*)(__int64 lm)>OFFSET(0x1EEB8D0);
