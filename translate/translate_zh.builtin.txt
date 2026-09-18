@@ -517,18 +517,25 @@ my showcase=我的展示
 #   kino der toten：B 站直搜 42 条里 20+ 条作「亡灵剧院」、**「死亡剧院」0 条**（Fandom 那个写法中文圈不用），
 #     灰机/百度百科 亦作「亡灵剧院」⇒ **改**（原「亡者之剧院」是第三种写法）。
 #   ★判据升级（用户 2026-09-17）：**有歧义就跟着灰机，其次 Fandom 维基，最后 B 站**（顺序即优先级）。
+#   ★★**2026-09-18 用户反转两站顺序：现行 = 游戏官方中文 > Fandom 中文 > 灰机 > B 站**（上面的旧顺序已失效，
+#     本节及以上按"灰机优先"写下的取舍说明——血浴之城 / 亡灵剧院 / 阿森松 ——**仅作历史记录**）⇒ 已按新规则切换为：
+#       `gorod krovi=血狱之城`、`kino der toten=死亡剧院`、`ascension=上升`
+#       + Speed Cola=快手汽水、Quick Revive=快速救援、Mule Kick=三枪饮料、Juggernog=厚血蛋奶酒
+#       + 术语 Perk-a-Cola=特长饮料、power-up=强力奖励、Mystery Box=神秘宝箱、PhD Flopper=飞扑专家。
+#     批量脚本 = `.codebuddy/ref/apply_fandom_names.py`（带「期望条数」断言；**只改值、不碰键与注释**）。
+#     ⚠️ 本文件里其它写着「灰机 > Fandom」的注释同理已失效，遇到冲突按新顺序判。
 #   `ascension`：灰机作「阿森松」⇒ 按灰机优先改（原「升天」是 Fandom 的直译写法）。
 #   `shangri-la`：灰机作「世外桃源」⇒ 按灰机优先改（原「香格里拉」虽是 Shangri-La 的通用中文，但定了灰机优先就跟着灰机）。
 shadows of evil=恶灵之影
 the giant=巨人
 der eisendrache=钢铁之龙
 zetsubou no shima=绝望之岛
-gorod krovi=血浴之城
+gorod krovi=血狱之城
 revelations=启示录
 nacht der untoten=亡者之夜
 shi no numa=死亡沼泽
-~kino der toten=亡灵剧院
-ascension=阿森松
+~kino der toten=死亡剧院
+ascension=上升
 shangri-la=世外桃源
 moon=月球
 origins=起源
@@ -755,7 +762,7 @@ roamer options=游荡者选项
 perk options=技能选项
 game options=游戏选项
 bot options=电脑玩家选项
-powerup options=道具选项
+powerup options=强力奖励选项
 gobblegum options=泡泡糖选项
 zombies options=僵尸选项
 weapons options=武器选项
@@ -804,8 +811,8 @@ gobblegum base cost=泡泡糖基础价格
 spawn with perkaholic=出生携带「技能狂」
 spawn with quick revive=出生携带「快速复活」
 bigger mulekick=强化「骡子踢」
-enable free perk powerup=启用免费技能道具
-powerup spawn amount=道具生成数量
+enable free perk powerup=启用免费技能强力奖励
+powerup spawn amount=强力奖励生成数量
 random starting weapon=随机起始武器
 start with rk5=起始武器为 RK5
 start with bowie knife=起始武器为鲍伊猎刀
@@ -859,15 +866,15 @@ perk acquired=获得技能
 #    mod 名由「一律不翻」改为「允许翻译」（原「唯一例外 = 用户指定的 All-around Enhancement」作废）。mod 名条目见文末「MOD 名」节。
 girls' frontline: black ops iii 2.0=少女前线：黑色行动 III 2.0
 roamer time between rounds=游荡者回合间隔
-enable packapunch powerup=启用强化机道具
-enable zombie cash powerup=启用僵尸现金道具
+enable packapunch powerup=启用强化机强力奖励
+enable zombie cash powerup=启用僵尸现金强力奖励
 start with all doors open=出生时所有门已开启
-share weapon from mystery box=从神秘箱共享武器
-mystery box in all locations=所有地点都有神秘箱
+share weapon from mystery box=从神秘宝箱共享武器
+mystery box in all locations=所有地点都有神秘宝箱
 extra points per headshot kill=每次爆头击杀额外点数
 extra points per melee kill=每次近战击杀额外点数
 open the gobblegum options menu.=打开泡泡糖选项菜单。
-open the powerup options menu.=打开道具选项菜单。
+open the powerup options menu.=打开强力奖励选项菜单。
 open the server settings menu.=打开服务器设置菜单。
 open the player options menu.=打开玩家选项菜单。
 open the zombie options menu.=打开僵尸选项菜单。
@@ -882,7 +889,7 @@ get extra points for killing zombies.=击杀僵尸可获得额外点数。
 disables the video in loading screen.=禁用载入界面的动画。
 let the player buy unlimited perks.=允许玩家无限购买技能。
 choose which round to start on.=选择从第几回合开始。
-choose how many powerups spawn per round.=选择每回合生成多少道具。
+choose how many powerups spawn per round.=选择每回合生成多少强力奖励。
 intro movie is always disabled in co-op.=合作模式下开场动画始终禁用。
 choose the preferred t-doll as your in-game character!=选择喜欢的战术人形作为游戏角色！
 choose how many points to start a game with.=选择开局携带多少点数。
@@ -911,10 +918,10 @@ shared: damage is split between you and the victim.=共享：伤害由你和受�
 knock back: knocks back the teammate only, doesn't reduce hp.=击退：只把队友击退，不减少生命值。
 non-lethal: the victim can be damaged however not killed by friendly fire.=非致命：受击者会受伤，但不会被友军火力击杀。
 removes the delay between rounds. obviously pointless if you have roamer enabled.=移除回合之间的延迟。若已启用游荡者，此项显然没有意义。
-spawns the mystery box in every possible location at once. prevents teddies.=在所有可能出现的位置同时生成神秘箱，不会再出泰迪熊。
+spawns the mystery box in every possible location at once. prevents teddies.=在所有可能出现的位置同时生成神秘宝箱，不会再出泰迪熊。
 revive all players at the end of the round and gain full health.=回合结束时复活所有玩家并恢复满血。
 just like in cold war zombies, score events will show how you got the score.=和《冷战》僵尸模式一样，得分事件会显示你的得分来源。
-marks the location of every pap machine, perk-a-cola, power switch etc on your hud for easier navigation.=在 HUD 上标出所有强化机、技能可乐、电源开关等位置，方便寻路。
+marks the location of every pap machine, perk-a-cola, power switch etc on your hud for easier navigation.=在 HUD 上标出所有强化机、特长饮料、电源开关等位置，方便寻路。
 adds a zombie counter at the top left of the screen to show you how many zombies are left in the wave.=在屏幕左上角添加僵尸计数器，显示本波还剩多少僵尸。
 enables timed gameplay mode. when active, zombies don't stop spawning and the goal is to last as long as possible. not compatible with roamer or the zombie counter.=启用限时玩法模式。开启后僵尸会持续生成，目标是尽可能坚持更久；与游荡者和僵尸计数器不兼容。
 at the beginning of every new round players guns, ammo, score, perks and gumballs are saved and if all players die the round is reset and players return to the last checkpoint with their last saved loadout.=每回合开始时保存玩家的武器、弹药、得分、技能和泡泡糖；若全员阵亡，回合会重置，玩家带着上次保存的配装回到最后一个检查点。
@@ -929,7 +936,7 @@ gives every player a random starting weapon.=让每位玩家获得随机起始�
 cost of gobblegum will not change.=泡泡糖价格不会变化。
 defines the total of bot players.=设置电脑玩家总数。
 disable all gobblegum machines on the map.=禁用地图上所有泡泡糖机。
-enabling lets the free perk powerup drop.=启用后免费技能道具可以掉落。
+enabling lets the free perk powerup drop.=启用后免费技能强力奖励可以掉落。
 choose how long you have between rounds.=选择回合之间的间隔时间。
 mulekick now lets you carry 4 weapons.=「骡子踢」现在允许携带 4 把武器。
 press melee key to share the weapon.=按近战键共享该武器。
@@ -937,16 +944,16 @@ max ammos refill your clip as well.=「最大弹药」同时会装满弹匣。
 all gobblegums are available and selected at random.=所有泡泡糖均可用，并随机选取。
 get extra points for killing zombies by headshots.=爆头击杀僵尸可获得额外点数。
 get extra points for killing zombies by melee.=近战击杀僵尸可获得额外点数。
-share the weapon from mystery box with others.=把神秘箱里拿到的武器分享给其他人。
+share the weapon from mystery box with others.=把神秘宝箱里拿到的武器分享给其他人。
 zombies will always sprint, even on round 1.=僵尸始终冲刺，即使在第 1 回合。
 choose how many points per zombie you get.=选择每击杀一只僵尸获得多少点数。
 adds a health bar for each enemy ai.=为每个敌方 AI 添加血条。
 defines how many gobblegums you can buy every round.=设置每回合可以购买多少个泡泡糖。
-adds a packapunch powerup that temporarily upgrades the weapon you're currently holding.=增加一个强化机道具，可暂时升级你当前手持的武器。
+adds a packapunch powerup that temporarily upgrades the weapon you're currently holding.=增加一个强化机强力奖励，可暂时升级你当前手持的武器。
 casts t-dolls or sf units (those generic enemies in campaign) as zombies.=把战术人形或 SF 单位（战役里那些普通敌人）作为僵尸出场。
 sets the zombie spawn delay to 0. with this, zombies spawn instantly.=把僵尸生成延迟设为 0，这样僵尸会立即生成。
 bot health scales with zombie health to compensate for their poor ai.=电脑玩家的生命值随僵尸生命值变化，以弥补他们糟糕的 AI。
-adds a zombie cash powerup that can give (or take away) points.=增加一个僵尸现金道具，可以给予（或扣除）点数。
+adds a zombie cash powerup that can give (or take away) points.=增加一个僵尸现金强力奖励，可以给予（或扣除）点数。
 perks are gradually lost as time goes by when a player is downed.=玩家倒地后，技能会随时间逐渐流失。
 nukes now give a set amount of points per zombie killed (minimum of 400).=核弹现在按击杀僵尸数量给予固定点数（最低 400）。
 changes the starting pistol to the rk5, as if the player has completed the super ee.=把起始手枪改为 RK5，相当于玩家已完成超级彩蛋。
@@ -989,7 +996,15 @@ lots of qol improvements and other additional features are added and fine-tuned 
 #    mod 名由「一律不翻」改为「允许翻译」（原「唯一例外 = 用户指定的 All-around Enhancement」作废）。mod 名条目见文末「MOD 名」节。
 ^3stamin-up^7: raise your weapon after sprinting much quicker, fire and throw grenades while running, and unlimited sprint=^3Stamin-Up^7：冲刺后更快举枪，奔跑中可开火与投掷手雷，并且无限冲刺
 ^3double tap root beer^7: special weapon charges faster=^3Double Tap Root Beer^7：专家武器充能更快
-^1widow's wine^7: gives phd flopper explosive resistance (only works when there is only one damage protection perk on the map)=^1Widow's Wine^7：让 PhD Flopper 获得爆炸抗性（仅当地图上只有一个伤害防护类技能时生效）
+^1widow's wine^7: gives phd flopper explosive resistance (only works when there is only one damage protection perk on the map)=^1寡妇美酒^7：让飞扑专家获得爆炸抗性（仅当地图上只有一个伤害防护类技能时生效）
+# ↑ 2026-09-18 专名定案（**用户改优先级规则后已更新**）：`PhD Flopper` 取 **Fandom 中文的「飞扑专家」**。
+#   ① 现行规则（用户 2026-09-18 调整）：**Fandom 中文 > 灰机 > B站**（原为灰机优先，已反转）；
+#   ② 用户理由（原话）："我是测这个效果是滑铲距离加长，所以我觉得飞扑专家贴切"
+#      —— 该 mod 给的效果偏位移/滑铲族，「防爆博士」不如前者贴切；
+#   ③ 来源记录：Fandom 中文《飞扑专家》（PhD Flopper，全名"飞扑专家汽水"）；
+#      灰机《PhD Flopper(ZCola)》页面标题 =「防爆博士 / 飞扑博士」（现代版另称「滑铲博士」）。
+#   ⇒ 若日后要改成「滑铲博士」（更强调滑铲），只需改本行两处片段即可。
+#   ⚠️ BO3 本体没有这个汽水（灰机 BO3 汽水列表不含它）⇒ 这是 mod 自加技能。`Widow's Wine` 维持词库定名「寡妇美酒」。
 *: speed up the purchase of perks and gobblegums, ads, switching weapons, and melee speed, and removes the *=*：加快购买技能与泡泡糖、开镜、换枪和近战速度，并移除「首次举枪」动画
 
 # ═══ MOD：工坊模组栈界面 ═══
@@ -1139,18 +1154,53 @@ hold ^3f^7 for dmr 14 [cost: 500]=按住 ^3F^7 购买 DMR 14 [价格: 500]
 # ⚠️ **已知限制，用户 2026-09-18 明确决定不修**：带 `[Cost: N]` 的组合用不了 2 星模板（`for * [cost: *]` 永远被
 #    泛用的 `for *` 抢先整行吃掉）⇒ 价格标签保持英文 `[Cost: 25000]`。用户原话：**"价格翻不了就不翻，这个不影响阅读"**。
 #    ⇒ **不要再写 2 星模板**（写了也不会命中，等于死条目）；新价位照旧手写精确条目。引擎侧改动已按此决定全部退回。
-hold ^3f^7 for ^3widow's wine^7=按住 ^3F^7 购买 ^3寡妇美酒^7
-hold ^3f^7 for ^3permanent perk - (widow's wine)^7=按住 ^3F^7 购买 ^3永久技能（寡妇美酒）^7
-hold ^3f^7 for ^3random wonder weapon^7 from kino der toten=按住 ^3F^7 从亡灵剧院购买 ^3随机奇迹武器^7
+hold ^3f^7 for ^3random wonder weapon^7 from kino der toten=按住 ^3F^7 从死亡剧院购买 ^3随机奇迹武器^7
 hold ^3f^7 to ^3increase pack-a-punch tier^7=按住 ^3F^7 提升 ^3强化机等级^7
-hold ^3f^7 for ^3ammo replenish [upgrade 1: faster reload replenish]^7=按住 ^3F^7 购买 ^3弹药补给 [升级 1：更快的换弹补给]^7
-hold ^3f^7 for ^3faster ads & weapon swapping^7=按住 ^3F^7 购买 ^3更快的开镜与切枪^7
+# 2026-09-18 补入：同一张图的「奖励点」购买提示（采集原文见 ui_dump.txt，用户截图点名的 5 条在其中）。
+# ⚠️ 为什么必须写精确条目而不是靠片段：这些 run 会被 `hold ^3f^7 for ^3*^7` / `hold ^3f^7 for *` 模板**整行吃掉**，
+#    而命中顺序是「精确 → 模板 → 片段」⇒ **模板命中后就不再走片段通道**，所以名字里的 `~double tap` /
+#    `~widow's wine` 这类片段对它们**完全无效**（用户截图里 `按住 F 购买 Double Tap` 就是这么来的）。
+#    ⇒ 「按住 F 购买 + 专名」这一族，只要有官方/已定中文名，就得照下面这样逐条写精确条目。
+hold ^3f^7 for ^3faster movement^7 for 1 round=按住 ^3F^7 购买 ^3更快移动^7（持续 1 回合）
+hold ^3f^7 for ^3insta-kill^7 for 1 round=按住 ^3F^7 购买 ^3秒杀^7（持续 1 回合）
+hold ^3f^7 for ^3mystery pedestal^7 [cost: 25000]=按住 ^3F^7 购买 ^3神秘底座^7 [价格: 25000]
+hold ^3f^7 for cursed relic=按住 ^3F^7 购买诅咒遗物
+# 下面两条：专名按 2026-09-18 的既有决定**保留英文原名**（见文件末尾「保留原文」说明），只翻外围词。
+# 2026-09-18 第三批：把该族**剩下所有**缺精确条目的补齐（用脚本对全量采集做了差集，见下方"第三批"说明）。
 hold ^3f^7 to pick up ^3*^7=按住 ^3F^7 拾取 ^3*^7
-hold ^3f^7 for ^3*^7=按住 ^3F^7 购买 ^3*^7
 hold ^3f^7 to ^3*^7=按住 ^3F^7 使用 ^3*^7
-hold ^3f^7 for *=按住 ^3F^7 购买 *
 hold ^3f^7 to *=按住 ^3F^7 使用 *
 hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
+# 2026-09-18：这一族从「一句一条」合并为片段规则（用户要求「拆分合并，不要一句一句的」）。
+# 固定部分一条长片段吃掉前缀，名字各一条片段 ⇒ 名字在任何句子里都能翻，新组合不必再加条目。
+# 等价性由 match_sim.py 逐条比对（改动前后除改进外不得有差异）。
+~hold ^3f^7 for =按住 ^3F^7 购买
+# 2026-09-18：MOD 名/道具名的通用片段（用户截图反馈「黑色行动 3 Wonder Weapon Pack」只翻了前半）。
+# 「奇迹武器」沿用库里既有口径（见 `…random wonder weapon… from kino der toten` 那条）。
+# 片段按「键长从长到短」试 ⇒ `wonder weapon pack` 先于 `wonder weapon` 命中。
+~wonder weapon pack=奇迹武器包
+~wonder weapon=奇迹武器 
+# 2026-09-18：原来把「Upgrade 1」写死在键里 ⇒ 用户截图遇到 Upgrade 2 就翻不了。拆成通用片段：
+#   名字 / 括号整句 / 尾句各一条 ⇒ 以后出 Upgrade 3、4 也能翻出主体（「升级 N：」那截对未收录的编号会留英文）。
+~ammo replenish=弹药补给
+~upgrade 1: faster reload replenish=升级 1：更快的换弹补给
+~upgrade 2: faster reload replenish=升级 2：更快的换弹补给
+~faster reload replenish=更快的换弹补给
+~blast furnace ammo mod=Blast Furnace 弹药模组
+~dead wire ammo mod=Dead Wire 弹药模组
+~faster ads & weapon swapping=更快的开镜与切枪
+~friendly maxis drone=友方 Maxis 无人机
+~juggernog=厚血蛋奶酒
+~permanent perk - (speed cola)=永久技能（快手汽水）
+~permanent perk - (widow's wine)=永久技能（寡妇美酒）
+# 2026-09-18：这族的前缀原来是「没人管」的（截图：`按住 F 购买 Permanent Perk - (分裂射击)`）。
+# 名字片段（~double tap / ~phd flopper …）各管名字，**前缀单独一条** ⇒ 任何新名字都不必再加条目。
+# 片段按「键长从长到短」试 ⇒ 上面两条更长的（带全角括号）仍优先命中，只留新名字吃下面这条
+#（代价：新名字后面那个 `)` 是半角，与上面两条的全角 `）` 不完全一致）。
+~permanent perk - (double tap)=永久技能（分裂射击）
+~permanent perk - (phd flopper)=永久技能（飞扑专家）
+~permanent perk - (=永久技能（
+~power up spawning 2x faster=强力奖励生成快 2 倍
 ^3[{+reload}]^7 reload=^3[{+reload}]^7 装填
 ^3r^7 reload=^3R^7 装填
 
@@ -1286,12 +1336,11 @@ perkaholic=技能狂
 ~self medication=自行治疗
 ~power vacuum=频繁强化
 ~reign drops=全面强化
-juggernog=厚血蛋酒
-~quick revive=快速复苏
-~speed cola=快手可乐
+~quick revive=快速救援
+~speed cola=快手汽水
 ~double tap=分裂射击
 ~double tap ii=分裂射击 II
-~mule kick=三枪烈酒
+~mule kick=三枪饮料
 stamin-up=耐力提升
 ~deadshot daiquiri=死亡射手
 ~electric cherry=电击樱桃
@@ -1309,6 +1358,15 @@ stamin-up=耐力提升
 # ⚠️ 片段的值里不要再出现 * —— 那是模板的语法，片段只要"英文=中文"。
 ~black ops iii=黑色行动 III
 ~black ops 3=黑色行动 3
+# 2026-09-18 补入：奖励点（同一张 workshop 地图）里的通用组合件 ⇒ 让「随机 <武器类别>」这类新组合自动成立，
+# 不必再为每个类别各写一条。片段按**键长降序**匹配，所以 `~random shotgun` 会先于 `~random weapon` 命中。
+~random shotgun=随机霰弹枪
+~random smg=随机冲锋枪
+~random lmg=随机轻机枪
+~random ar weapon=随机突击步枪
+~random weapon=随机武器
+~faster movement=更快移动
+~cursed relic=诅咒遗物
 
 # ═══ workshop 地图 / mod 的 UI 与简介（2026-09-18 采集补入）═══
 # 用户澄清过「没聊天，全程单人玩，有些是 mod/地图简介」⇒ 这些句子要翻，别当聊天跳过。
@@ -1348,3 +1406,47 @@ mass-energy equivalence, secret tests, crash-landing perks. survive in the iconi
 this map is still a work in progress and has some bugs i need to fix, but i'd like feedback a=这张地图仍在制作中，还有些我得修的 bug，不过我很希望能收到反馈……
 watch your step! fight for survival atop the towers of doom, where dizzying heights and the relentless undead make a deadly combination.=小心脚下！在末日高塔之巅为生存而战——令人眩晕的高度加上无穷无尽的尸潮，是致命的组合。
 this is a small remaster of verruckt trying to emulate the feeling of classic zombies like waw and bo1. the courtyard and some outside parts are now playable.=这是「疯狂」的小型重制版，力求还原《战火世界》与《黑色行动 1》那种经典僵尸手感。现在庭院与部分室外区域也能游玩了。
+
+# ═══ MOD：奖励点道具的方括号说明（2026-09-18 采集补入）═══
+# 同一张 workshop 地图的「奖励点」里，每件道具下方那行用 `[^3…^7]` 包起来的说明。四条都以
+# `- Increases Reward Luck^7]` 结尾；按词库既有用词译作「提升奖励运气」（reward=奖励、运气见 i'm feeling lucky）。
+# ⚠️ 这四条整行写死是**有意的**：它们是被 `[^3*^7]` 之类通配吃不到的长句，逐条给出才能保证排版与颜色码一致。
+[^3zombies deal double damage (2-hit down with juggernog) - increases reward luck^7]=[^3僵尸造成双倍伤害（带厚血蛋奶酒时两下即倒）——提升奖励运气^7]
+[^34 perk limit (perks are replaced when picked up) - increases reward luck^7]=[^3技能上限 4 个（拾取新技能会顶替旧的）——提升奖励运气^7]
+[^3zombies have chance to explode on death - increases reward luck^7]=[^3僵尸死亡时有概率爆炸——提升奖励运气^7]
+[^3only 1 weapon allowed. keeps holding weapon - increases reward luck^7]=[^3只允许携带 1 把武器（持有本道具时保留手上武器）——提升奖励运气^7]
+
+# ═══ MOD：任务 / 界面提示（2026-09-18 晚 第二采集批）═══
+# 采集更新（6106 → 6202 行）后 triage 工作清单里**真正该翻**的 9 条；其余候选是玩家名 / 聊天 /
+# 工坊地图名（ADLERSTADT / NIGHTMARE / STANDBY / Return to Verruckt 等）⇒ 按既有策略一律保留原文。
+# 措辞尽量与既有条目对齐：checkpoints=检查点、elevator is active=电梯已启动、infection=感染、
+# max ammos refill your clip as well.=「最大弹药」、build your mod stack=构建你的模组栈。
+checkpoint reached=抵达检查点
+objective updated=目标已更新
+last checkpoint=上次检查点
+elevator moving..=电梯运行中……
+keycard needed=需要门禁卡
+# Firing Range：自定义地图里的射击区（若按 BO 多人地图算也是同一意思）⇒ 描述性直译，稳妥。
+firing range=靶场
+# 下面两条属于既有「工坊模组栈」那一族（见 build your mod stack / apply changes 那组）⇒ 用词保持一致。
+applying your mod stack...=正在应用你的模组栈……
+exit to desktop=退出到桌面
+# 游戏/模组的拒绝提示（已有「最大弹药」这个道具名，沿用）。
+you already have max ammo=你已经有最大弹药了
+
+# ═══ MOD：奖励点（第三批 2026-09-18 晚；含「为啥工具没报」的说明）═══
+# 用户带截图追问「PHD Flopper / Extra Points / [Zombies have a chance to give extra points] 咋没命中」⇒ 查出两个原因：
+#   ① **模板遮蔽**（已记进长期记忆）：`hold ^3f^7 for ^3*^7` / `hold ^3f^7 for *` 命中后**不再走片段通道**
+#      ⇒ 名字上的 `~` 片段无效，必须逐条写精确条目；
+#   ② ★**工具盲区（这才是"没抓到"的根因）**：`dict_triage.py` 把被模板命中的 run 归入「已有-模板」桶 ⇒
+#      **这类 run 从不进入工作清单**，所以前两批清单里根本看不到它们。修法见 `ref/exact_gap.py`（按前缀做精确键差集）。
+# 同一道具的卡片文案：其中 7 条（Extra Points Per Kill / …for killing zombies / Gives every player a random
+# starting weapon.）**词库里早就有了**（行 815 / 867 / 868 / 881 / 928 / 938 / 939，用词是「点数 / 僵尸 / 起始」）
+# ⇒ 本批只补真正缺的那条方括号说明，并把本批用词统一到既有口径（原先写的「分数 / 丧尸 / 初始」已改）。
+# ⚠️ 教训：**写之前先按整条 run 查精确键** —— 这次 `dict_verify` 的「重复键 7 个」当场抓出来了。
+[^3zombies have a chance to give extra points^7]=[^3僵尸有概率给予额外点数^7]
+# 下面 4 条是**可组合片段**（键以 ~ 开头；解析器只认前缀，放哪一节都能解析，这里跟着它服务的词走）。
+~phd flopper=飞扑专家
+~extra points=额外点数
+~random perk=随机技能
+~cursed pedestal=诅咒底座
