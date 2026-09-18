@@ -75,7 +75,7 @@ Edit `T7Patch\t7patch.conf` (hot-reloads within ~1 second of saving):
 | `translate=` | `1` = replace English UI text with the mod-translation dictionary (default off; also a menu toggle). On a game that is not running in Chinese the start-up check switches it off and writes this back to `0` |
 | `skip_pvp=` | `1` = leave Multiplayer untranslated (default `1`). The main menu is unaffected; needs `translate=1` |
 | `skip_zm=` | `1` = leave Zombies untranslated (default `0`). Campaign is never affected; needs `translate=1` |
-| `dev_tools=` | `1` = **development-tools mode**: collect English UI text into `T7Patch\ui_dump.txt` (input for the dictionary and for the fragment-candidate pass in `.codebuddy\ref\dev_pipeline.py`). Default off, deliberately not a menu entry. The old key name `dump_ui_strings` is still read and is renamed on the next config rewrite |
+| `dev_tools=` | `1` = **development-tools mode**: collect English UI text. Default off, deliberately not a menu entry. The old key name `dump_ui_strings` is still read and is renamed on the next config rewrite |
 
 **Upgrading from an older version**: you do not need to edit the file. Any setting it
 does not mention uses the default from the table above, and on start-up the patch

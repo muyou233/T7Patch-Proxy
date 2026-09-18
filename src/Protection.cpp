@@ -1056,7 +1056,7 @@ struct patch_config
         outfile << "skip_zm=" << v.skip_zm << std::endl;
         outfile << std::endl;
 
-        outfile << "# 开发工具模式：采集界面英文文本到 T7Patch\\ui_dump.txt（做词库 / 片段候选发现用；采集后跑 .codebuddy\\ref\\dev_pipeline.py 出清单）1/0开启关闭" << std::endl;
+        outfile << "# 开发工具模式：采集界面英文文本 1/0开启关闭" << std::endl;
         outfile << "dev_tools=" << v.dev_tools << std::endl;
         outfile << std::endl;
 
