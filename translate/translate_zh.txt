@@ -1291,8 +1291,22 @@ Trying to get right into the action? Skip the intro cinematic.=想直接进入�
 Wanting a more authentic environment? Toggle Patreon supporter names in the map.=想要更原汁原味的环境？开关地图中的 Patreon 赞助者名称。
 Choose the weapons found in the Mystery Box and on the wall.=选择神秘宝箱与墙上出现的武器。
 Prefer the classic Pack'd weapon names? Toggle Patreon supporter Pack-a-Punch names in the map.=偏好经典的改造武器名称？开关地图中的 Patreon 赞助者改造武器名称。
-Call of the Dead=亡灵召唤
+~call of the dead=亡灵召唤
 Die Rise - Great Leap Forward=死亡高楼 - 大跃进
+# ── 第三十三轮补译（2026-09-18，用户："应该又有新词了"）─────────────────────────────────
+# 采集 2174 条唯一串 / 未命中 964（比上轮 983 少 19，说明上轮补译生效）；「界面文本候选」78 条里
+# 剔除玩家名·赞助者名·公屏聊天·大写工坊图名·`[img]` URL 后，真正是界面文本的就下面这几条。
+# ⚠️ 两条纪律：① `stats` / `support` 这类**通用词**用**精确条目**（做片段会把 "player stats" / "support the team" 一起吃掉）；
+# ② `release build` 反而**必须做片段** —— 它后面跟着会变的版本号（`v1.2.4`），键里写死编号就废了。
+~resume game=继续游戏
+~quest items=任务物品
+~easter egg=彩蛋
+~release build=正式版
+stats=战绩
+support=支持
+usermaps=用户地图
+navcard table=导航卡台
+trample steam=蒸汽碾压机
 A shipwrecked crew of fearless explorers is hopelessly stranded in an abandoned Siberian outpost. Their dream of discovering the true origins of the Element 115 unravels into a hellish nightmare.=一群无畏的探险家因海难被困在废弃的西伯利亚前哨站。他们追寻 115 号元素真正起源的梦想，最终化为一场地狱般的噩梦。
 The Giant is rising. Face the might of the Nazi Zombies in their heartland. This is where it all began. This is where the master plan took shape. Is this where it all ends?=巨人正在崛起。在他们的腹地直面纳粹僵尸的威势。一切由此开始，宏图在此成形。这里会是终结之地吗？
 # Fire Works ⇒ **爆裂焰火**。⚠️ 注意拼写：BO3 原文是**两个词** `Fire Works`（不是 `Fireworks`）——
