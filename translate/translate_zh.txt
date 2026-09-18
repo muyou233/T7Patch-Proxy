@@ -1411,10 +1411,11 @@ this is a small remaster of verruckt trying to emulate the feeling of classic zo
 # 同一张 workshop 地图的「奖励点」里，每件道具下方那行用 `[^3…^7]` 包起来的说明。四条都以
 # `- Increases Reward Luck^7]` 结尾；按词库既有用词译作「提升奖励运气」（reward=奖励、运气见 i'm feeling lucky）。
 # ⚠️ 这四条整行写死是**有意的**：它们是被 `[^3*^7]` 之类通配吃不到的长句，逐条给出才能保证排版与颜色码一致。
-[^3zombies deal double damage (2-hit down with juggernog) - increases reward luck^7]=[^3僵尸造成双倍伤害（带厚血蛋奶酒时两下即倒）——提升奖励运气^7]
-[^34 perk limit (perks are replaced when picked up) - increases reward luck^7]=[^3技能上限 4 个（拾取新技能会顶替旧的）——提升奖励运气^7]
-[^3zombies have chance to explode on death - increases reward luck^7]=[^3僵尸死亡时有概率爆炸——提升奖励运气^7]
-[^3only 1 weapon allowed. keeps holding weapon - increases reward luck^7]=[^3只允许携带 1 把武器（持有本道具时保留手上武器）——提升奖励运气^7]
+~[^3zombies deal double damage (2-hit down with juggernog) - increases reward luck^7]=[^3僵尸造成双倍伤害（带厚血蛋奶酒时两下即倒）——提升奖励运气^7]
+~[^34 perk limit (perks are replaced when picked up) - increases reward luck^7]=[^3技能上限 4 个（拾取新技能会顶替旧的）——提升奖励运气^7]
+~[^3zombies have chance to explode on death - increases reward luck^7]=[^3僵尸死亡时有概率爆炸——提升奖励运气^7]
+~[^3zombies speed 2x faster - increases reward luck^7]=[^3僵尸速度变快 2 倍——提升奖励运气^7]
+~[^3only 1 weapon allowed. keeps holding weapon - increases reward luck^7]=[^3只允许携带 1 把武器（持有本道具时保留手上武器）——提升奖励运气^7]
 
 # ═══ MOD：任务 / 界面提示（2026-09-18 晚 第二采集批）═══
 # 采集更新（6106 → 6202 行）后 triage 工作清单里**真正该翻**的 9 条；其余候选是玩家名 / 聊天 /
