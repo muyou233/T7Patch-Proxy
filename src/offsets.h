@@ -118,6 +118,15 @@ const static auto UI_DoModelStringReplacement = reinterpret_cast<bool(__fastcall
 // 脚本(Lua)驱动的 HUD 文本 —— 奖励横幅那种"功能性 mod 用脚本画的字"应该走这里。
 // ⚠️ 签名 15 个参数、`__fastcall`，一个都不能少/错（错了压栈就乱）。
 const static auto UI_Interface_DrawText = reinterpret_cast<void(__fastcall*)(unsigned int localClientNum, __int64* luiElement, float xPos, float yPos, unsigned int R, unsigned int G, unsigned int B, unsigned int A, char flags, char* text, __int64 font, float fontHeight, float wrapWidth, float alignment, char luaVM, __int64* element)>OFFSET(0x1F28860);
+// [LOCAL] 横幅路径探索：**已结案（2026-09-18），别再来**。试过三个备选绘制出口，全部作废：
+//   UI_DrawTextPadding            0x228D100  (上游清单里是注释状态)
+//   CL_DrawTextPhysicalWithEffects 0x134DDC0 (同上)
+//   CG_BoldGameMessageCenter      0x8C4C80  (上游未注释，但同样打不中)
+// 实测（同一局里 `UI_Interface_DrawText` 记下地图名 / 地图描述 / `Hold ^3F^7 for …` 共 20+ 条，
+// 用户已进僵尸图）：三个挂钩 `MH_CreateHook` 全部返回 0（装机成功），但**整个会话一次都没有被调用**
+// ⇒ 这三个地址在本 build 上是死的，横幅另有绘制路径（很可能是 mod 自己的贴图/绘制管线）。
+// ⚠️ 另记一条教训：磁盘上的 `BlackOps3.exe` 被 **Arxan 加密**（连已知有效地址从磁盘读出来都是
+// 随机字节）⇒ **离线无法验证任何 RVA**，只能靠运行时 first-call 自检。
 const static auto LobbyTypes_GetMsgTypeName = reinterpret_cast<const char* (__fastcall*)(__int32 index)>OFFSET(0x1EDFA60);
 const static auto LobbyMsgRW_PrepWriteMsg = reinterpret_cast<bool(__fastcall*)(__int64 lobbyMsg, __int64 data, int length, int msgType)>OFFSET(0x1EEA560);
 const static auto LobbyMsgRW_PrepReadMsg = reinterpret_cast<bool(__fastcall*)(__int64 lm)>OFFSET(0x1EEB8D0);

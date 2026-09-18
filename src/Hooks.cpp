@@ -555,12 +555,13 @@ namespace hooks {
 		// 观察（dev_tools）：只记不改，且**先画完再记**。热路径纪律：绘制调用每帧成百次 ⇒
 		// 先做最便宜的判断（长度/空格/ASCII），再谈去重与写日志，同一个串只记一次、且有上限。
 		constexpr int kDrawnTextLogMax = 1024;
+		constexpr int kDrawnTextLogChars = 256;
 		constexpr int kDrawnTextTranslateMax = 1536;
 		constexpr int kDrawnTextRingCount = 8;
 		std::atomic<bool> g_drawnTextLog{ false };
 		unsigned long long g_drawnTextGateMs = 0;
 		int g_drawnTextSeenCount = 0;
-		char g_drawnTextStorage[kDrawnTextLogMax][128]{};
+		char g_drawnTextStorage[kDrawnTextLogMax][kDrawnTextLogChars]{};
 		thread_local char g_drawnTextRing[kDrawnTextRingCount][kDrawnTextTranslateMax]{};
 		thread_local int g_drawnTextRingNext = 0;
 
@@ -576,8 +577,43 @@ namespace hooks {
 			return g_drawnTextLog.load();
 		}
 
-		// 只认「像界面句子」的串：≥8 字节、含空格、含拉丁字母、且一个非 ASCII 都没有
-		// （中文是我们自己的译文；数字/符号/单 token 不是界面文案）。宁可漏报，不在热路径上做重活。
+		// True when the text carries a CJK ideograph.  Same test and same code
+		// point ranges as translate.cpp's HasCjk (that function is internal to
+		// that translation unit, so the range list is mirrored here).
+		bool HasCjkIdeograph(const char* s)
+		{
+			for (const unsigned char* p = reinterpret_cast<const unsigned char*>(s);
+				*p; ++p)
+			{
+				if (*p < 0xE0 || *p > 0xEF)
+					continue; // not a three-byte UTF-8 lead
+
+				const unsigned char b1 = p[1];
+				const unsigned char b2 = p[2];
+				if (b1 < 0x80 || b1 > 0xBF || b2 < 0x80 || b2 > 0xBF)
+					continue; // malformed: keep scanning byte by byte
+
+				const unsigned cp = (static_cast<unsigned>(*p & 0x0Fu) << 12) |
+					(static_cast<unsigned>(b1 & 0x3Fu) << 6) |
+					static_cast<unsigned>(b2 & 0x3Fu);
+
+				if (cp >= 0x4E00 && cp <= 0x9FFF)
+					return true; // unified ideographs
+				if (cp >= 0x3400 && cp <= 0x4DBF)
+					return true; // extension A
+				if (cp >= 0xF900 && cp <= 0xFAFF)
+					return true; // compatibility ideographs
+			}
+			return false;
+		}
+
+		// 只认「像界面句子」的串：≥8 字节、含空格、含拉丁字母、且**不含 CJK 汉字**。
+		//
+		// ⚠️ 判据必须与采集通道同口径（translate.cpp 的 HasCjk）——**不要**退回"任何字节 >= 0x80
+		// 就丢弃"的裸写法。那正是采集通道踩过的坑（见 fixcheck 的 "translate non-ascii filter
+		// removed"）：英文原文本来就带排版引号与重音字母，裸判据会把它们整条藏起来 ⇒
+		// 带 em dash 的英文串（如奖励横幅）就算真的走了这条出口也一条都记不下来。
+		// 非 ASCII 一律放行，只挡真正的汉字（那是我们自己的译文 / 游戏自带中文）。
 		bool LooksLikeUiSentence(const char* text)
 		{
 			if (!text || !text[0])
@@ -586,27 +622,25 @@ namespace hooks {
 			size_t n = 0;
 			bool space = false;
 			bool letter = false;
-			for (const char* p = text; *p && n < 120; ++p, ++n)
+			for (const char* p = text; *p && n < kDrawnTextLogChars - 1; ++p, ++n)
 			{
 				const unsigned char c = static_cast<unsigned char>(*p);
-				if (c >= 0x80)
-					return false;
 				if (c == ' ')
 					space = true;
 				else if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
 					letter = true;
 			}
-			return n >= 8 && space && letter;
+			return n >= 8 && space && letter && !HasCjkIdeograph(text);
 		}
 
+		// 去重必须拿**将要存下来的那一份**去比：原串可能超出缓冲、会在这里被截断，拿截断副本与完整
+		// 原串 strcmp 永远不会相等 ⇒ 长串每次绘制都记一条（实测：一条地图描述在 1.2 秒里刷了 33 条，
+		// 长度全是 127）。
 		void LogDrawnText(const char* text)
 		{
 			if (g_drawnTextSeenCount >= kDrawnTextLogMax)
 				return;
 
-			// 去重必须拿**将要存下来的那一份**去比：原串可能超过 128 字节、会在这里被截断，
-			// 拿截断副本与完整原串 strcmp 永远不会相等 ⇒ 长串每次绘制都记一条
-			// （实测：一条地图描述在 1.2 秒里刷了 33 条，长度全是 127）。
 			char key[sizeof(g_drawnTextStorage[0])]{};
 			strncpy_s(key, sizeof(key), text, _TRUNCATE);
 
@@ -620,7 +654,7 @@ namespace hooks {
 				sizeof(g_drawnTextStorage[0]), key);
 			++g_drawnTextSeenCount;
 
-			char msg[192]{};
+			char msg[320]{};
 			snprintf(msg, sizeof(msg), "drawtext %s", g_drawnTextStorage[g_drawnTextSeenCount - 1]);
 			overlay::DebugLog(msg);
 		}
@@ -1373,6 +1407,10 @@ namespace hooks {
 		// [LOCAL] 第三条字符串通道探针（见 LogDrawnText 上方说明）：HUD / LUI 文字绘制出口。
 		// 只在 bo3::address() 认得出来的 build 上安装 —— 未知 build 会拿到 February 的 RVA，
 		// 那等于挂到错误的指令上（后果是崩游戏，不是记错一行日志）。本机指纹 = September2026。
+		// [LOCAL] 第三条字符串通道（见 LogDrawnText 上方说明）：HUD / LUI 的文字绘制出口 ——
+		// 观察 + write-through 翻译都挂在这一条上。只在 bo3::address() 认得出来的 build 上安装 ——
+		// 未知 build 会拿到 February 的 RVA，那等于挂到错误的指令上（后果是崩游戏，不是记错一行日志）。
+		// 本机指纹 = September2026。（横幅那一路的备选出口探索已结案，结论见 offsets.h 的说明。）
 		if (bo3::current_build() != bo3::Build::Unknown)
 			MH_CreateHook((LPVOID)REBASE(0x1F28860), functions::hkUI_Interface_DrawText, (LPVOID*)&UI_Interface_DrawText);
 		/*MH_CreateHook((LPVOID)REBASE(0xA7DE0), functions::hkBG_Cache_GetScriptMenuNameForIndex, (LPVOID*)&BG_Cache_GetScriptMenuNameForIndex);
