@@ -1132,7 +1132,7 @@ hold ^3f^7 for tombstone (^22000^7)=按住 ^3F^7 购买墓碑汽水（^22000^7�
 hold ^3f^7 for tombstone [cost: 2000]=按住 ^3F^7 购买墓碑汽水 [价格: 2000]
 hold ^3f^7 to rebuild barrier=按住 ^3F^7 重建路障
 # 2026-09-18 采集补入：某 workshop 地图的补给点交互提示（键含 ^3 色彩码，与游戏送来的 run 逐字一致）。
-hold ^3f^7 to ^3refill weapons, grenades, and field upgrade^7=按住 ^3F^7 补满武器、手雷与战地升级
+hold ^3f^7 to ^3refill weapons, grenades, and field upgrade^7=按住 ^3F^7 补满 ^3武器、手雷与战地升级^7
 hold ^3f^7 for stock option=按住 ^3F^7 购买自动补给
 hold ^3f^7 for ammo [cost: 250]=按住 ^3F^7 购买弹药 [价格: 250]
 press ^3f^7 to take the weapon=按 ^3F^7 拾取武器
