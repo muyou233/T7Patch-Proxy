@@ -1551,11 +1551,27 @@ namespace translate
     }
 
     bool DictionaryPath(char* out, size_t outSize)
-    {
-        if (!out || outSize == 0)
-            return false;
-        return BuildDictionaryPath(out, outSize);
-    }
+        {
+            if (!out || outSize == 0)
+                return false;
+            return BuildDictionaryPath(out, outSize);
+        }
+
+    // [LOCAL] 2026-09-20: the pinyin table the map-safe switch renders with.
+    bool HanziPath(char* out, size_t outSize)
+        {
+            char dir[MAX_PATH * 2] = {};
+            if (!out || outSize == 0 || !BuildDataDir(dir, sizeof(dir)))
+                return false;
+            const int n = snprintf(out, outSize, "%s\\translate_pinyin.txt", dir);
+            return n > 0 && static_cast<size_t>(n) < outSize;
+        }
+
+    unsigned HanziCount()
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            return static_cast<unsigned>(g_hanzi.size());
+        }
 
     unsigned EntryCount()
     {

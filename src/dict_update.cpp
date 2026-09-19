@@ -42,7 +42,11 @@ namespace dict_update
             const wchar_t* url;
             bool jsonApi;
         };
-        constexpr Source kSources[] =
+        // 2026-09-20: two published files now - the main dictionary and the
+        // pinyin table the map-safe switch renders with.  Same three mirrors
+        // each, same order (jsDelivr for mainland reachability, GitHub raw for
+        // freshness, Gitee's JSON contents API last).
+        constexpr Source kDictSources[] =
         {
             {
                 L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
@@ -57,6 +61,25 @@ namespace dict_update
             {
                 L"https://gitee.com/api/v5/repos/muyou23333/"
                 L"t7-patch-proxy-translate/contents/translate/translate_zh.txt"
+                L"?ref=master",
+                true
+            },
+        };
+        constexpr Source kPinyinSources[] =
+        {
+            {
+                L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
+                L"/translate/translate_pinyin.txt",
+                false
+            },
+            {
+                L"https://raw.githubusercontent.com/muyou233/T7Patch-Proxy"
+                L"/main/translate/translate_pinyin.txt",
+                false
+            },
+            {
+                L"https://gitee.com/api/v5/repos/muyou23333/"
+                L"t7-patch-proxy-translate/contents/translate/translate_pinyin.txt"
                 L"?ref=master",
                 true
             },
@@ -328,24 +351,22 @@ namespace dict_update
             return true;
         }
 
-        void Worker()
+        // One published file: try every mirror in order; the first one that
+        // yields a plausible table wins.  'current' feeds the keep-ratio check
+        // that refuses a truncated file or an error page.  On success 'body'
+        // holds the text and 'got' its entry count.
+        bool UpdateFile(const Source* sources, size_t sourceCount, unsigned current,
+            std::string& body, std::string& err, unsigned& got)
         {
-            // Try every source in order; the first one that yields a valid
-            // dictionary wins.  A source that cannot be reached, or that
-            // serves something that is not a usable dictionary, just moves
-            // the attempt on to the next mirror - only when ALL of them
-            // fail does the button report a failure (plain text; the log
-            // carries which source said what).
-            const unsigned have = translate::EntryCount();
-            std::string body;
+            body.clear();
+            err = "all update sources are unreachable";
+            got = 0;
+
             std::string decoded; // JSON-API payload lives here, outside the
                                  // loop, so it can be swapped into body below
-            std::string err = "all update sources are unreachable";
-            unsigned got = 0;
-            bool valid = false;
-
-            for (const Source& src : kSources)
+            for (size_t i = 0; i < sourceCount; ++i)
             {
+                const Source& src = sources[i];
                 char urlName[192] = {};
                 WideCharToMultiByte(CP_UTF8, 0, src.url, -1,
                     urlName, sizeof(urlName), nullptr, nullptr);
@@ -381,45 +402,34 @@ namespace dict_update
                     err = "the downloaded file is not a dictionary";
                     continue;
                 }
-                if (have > 0 && got < static_cast<unsigned>(have * kMinKeepRatio))
+                if (current > 0 && got < static_cast<unsigned>(current * kMinKeepRatio))
                 {
                     Logf("dictionary update: source looks incomplete (%s): "
-                        "%u entries (currently %u)", urlName, got, have);
+                        "%u entries (currently %u)", urlName, got, current);
                     err = "the downloaded dictionary looks incomplete";
                     continue;
                 }
 
-                valid = true;
                 if (src.jsonApi)
-                    body.swap(decoded); // body must hold the dictionary text
-                                        // itself - the write below uses it
+                    body.swap(decoded); // body must hold the text itself -
+                                        // the write below uses it
                 Logf("dictionary update: using source %s (%u entries)",
                     urlName, got);
-                break;
+                err.clear();
+                return true;
             }
+            return false;
+        }
 
-            if (!valid)
-            {
-                Fail("%s", err.c_str());
-                return;
-            }
-
-            char path[MAX_PATH * 2] = {};
-            if (!translate::DictionaryPath(path, sizeof(path)))
-            {
-                Fail("cannot resolve the dictionary path");
-                return;
-            }
-
-            // Same directory, so the rename below is atomic; the write-time
-            // change is also what makes the running game reload it.
+        // Write 'body' over 'path' atomically: same directory, temporary file
+        // first, then a rename.  The write-time change is also what makes the
+        // running game reload the file.
+        bool InstallDictionary(const std::string& body, const char* path)
+        {
             char tmp[MAX_PATH * 2 + 8] = {};
             const int n = snprintf(tmp, sizeof(tmp), "%s.new", path);
             if (n <= 0 || static_cast<size_t>(n) >= sizeof(tmp))
-            {
-                Fail("the dictionary path is too long");
-                return;
-            }
+                return false;
 
             bool written = false;
             FILE* f = nullptr;
@@ -431,19 +441,67 @@ namespace dict_update
             if (!written)
             {
                 DeleteFileA(tmp);
-                Logf("dictionary update failed: cannot write %s", tmp);
-                Fail("cannot write the file");
-                return;
+                return false;
             }
-            if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING))
+            return MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) != 0;
+        }
+
+        void Worker()
+        {
+            // ---- 1. The main dictionary (required - the whole button exists
+            // for it).  Try every source in order; the first one that yields a
+            // valid dictionary wins.  A source that cannot be reached, or that
+            // serves something that is not a usable dictionary, just moves the
+            // attempt on to the next mirror - only when ALL of them fail does
+            // the button report a failure (plain text; the log carries which
+            // source said what).
+            const unsigned have = translate::EntryCount();
+            std::string body;
+            std::string err;
+            unsigned got = 0;
+            if (!UpdateFile(kDictSources, std::size(kDictSources),
+                    have, body, err, got))
             {
-                DeleteFileA(tmp);
-                Fail("cannot replace the file (locked?)");
+                Fail("%s", err.c_str());
                 return;
             }
 
+            char path[MAX_PATH * 2] = {};
+            if (!translate::DictionaryPath(path, sizeof(path)))
+            {
+                Fail("cannot resolve the dictionary path");
+                return;
+            }
+            if (!InstallDictionary(body, path))
+            {
+                Fail("cannot replace the dictionary file (locked?)");
+                return;
+            }
+
+            // ---- 2. The pinyin table (best effort).  2026-09-20: the
+            // map-safe switch renders pinyin from it, so an update that
+            // refreshes the dictionary should refresh it too - but its absence
+            // on a source (an older mirror not carrying the file yet) must not
+            // fail the run: the dictionary itself already landed.
+            char pinPath[MAX_PATH * 2] = {};
+            std::string pinErr = "cannot resolve the pinyin path";
+            unsigned pinGot = 0;
+            bool pinOk = false;
+            std::string pinBody;
+            if (translate::HanziPath(pinPath, sizeof(pinPath)))
+            {
+                pinOk = UpdateFile(kPinyinSources, std::size(kPinyinSources),
+                    translate::HanziCount(), pinBody, pinErr, pinGot)
+                    && InstallDictionary(pinBody, pinPath);
+                if (!pinOk)
+                    pinErr = pinErr.empty() ? "cannot replace the file" : pinErr;
+            }
+
             g_entries.store(got);
-            SetMessage("%u entries", got);
+            if (pinOk)
+                SetMessage("%u entries + %u pinyin", got, pinGot);
+            else
+                SetMessage("%u entries (pinyin not updated: %s)", got, pinErr.c_str());
             g_state.store(static_cast<int>(State::Ok));
 
             // Only a run that got this far starts the cooldown (see the
@@ -458,8 +516,17 @@ namespace dict_update
             // in force from here on - no restart, no waiting for a timestamp.
             translate::RequestReload();
 
-            Logf("dictionary updated from the network: %u entries (was %u); "
-                "reload requested - it lands on the next UI rebuild", got, have);
+            if (pinOk)
+            {
+                Logf("dictionary updated from the network: %u entries + %u pinyin "
+                    "(was %u entries); reload requested - it lands on the next UI rebuild",
+                    got, pinGot, have);
+            }
+            else
+            {
+                Logf("dictionary updated from the network: %u entries (was %u); "
+                    "pinyin table NOT updated: %s", got, have, pinErr.c_str());
+            }
         }
     }
 
