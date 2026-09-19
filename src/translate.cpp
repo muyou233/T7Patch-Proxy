@@ -446,9 +446,19 @@ namespace translate
             return captureCount == p.parts.size() - 1;
         }
 
+        // Defined further down (after ComposeFragments), but RenderTemplate needs
+        // it: a capture handed back by a template gets exactly one more look-up -
+        // the exact entries and the marked fragments, never the templates, since
+        // re-entering the template table from inside a template is the one way
+        // this could recurse.
+        bool LookupCaptureLocked(const char* lowerKey, const char* original,
+            char* out, size_t outSize);
+
         // Fills 'out' from a template value, replacing each '*' with the matching
         // capture taken from the ORIGINAL text (so "Most Used: hvk-30" keeps the
-        // user's casing in the Chinese sentence).
+        // user's casing in the Chinese sentence).  A capture the dictionary can
+        // translate IN PART is translated in part (see LookupCaptureLocked);
+        // whatever it cannot match is copied out byte for byte.
         bool RenderTemplate(const WildPattern& p, const char* original,
             const size_t* captureBegin, const size_t* captureEnd, size_t captureCount,
             char* out, size_t outSize)
@@ -461,11 +471,46 @@ namespace translate
                 {
                     if (next >= captureCount)
                         continue; // more placeholders than captures: drop it
-                    for (size_t k = captureBegin[next]; k < captureEnd[next]; ++k)
+
+                    // The capture is data no dictionary can enumerate (a player
+                    // name, a weapon, a mod name, a number) - but it can still
+                    // CONTAIN something the dictionary does know: the settings
+                    // profile "Rogue Run: Black Ops 3" carries the marked
+                    // fragment "black ops 3".  Without this second look-up the
+                    // capture stayed fully Latin even though the fragment was
+                    // right there.
+                    const size_t capFrom = captureBegin[next];
+                    const size_t capTo = captureEnd[next];
+                    const size_t capLen = capTo - capFrom;
+                    bool copied = false;
+
+                    if (capLen > 0 && capLen < kRunMax)
                     {
-                        if (written + 1 >= outSize)
-                            return false;
-                        out[written++] = original[k];
+                        char subKey[kRunMax];
+                        char subOut[kRunMax * 2];
+                        memcpy(subKey, original + capFrom, capLen);
+                        subKey[capLen] = 0;
+                        LowerInPlace(subKey);
+                        if (LookupCaptureLocked(subKey, original + capFrom, subOut,
+                                sizeof(subOut)))
+                        {
+                            const size_t subLen = strlen(subOut);
+                            if (written + subLen + 1 > outSize)
+                                return false;
+                            memcpy(out + written, subOut, subLen);
+                            written += subLen;
+                            copied = true;
+                        }
+                    }
+
+                    if (!copied)
+                    {
+                        for (size_t k = capFrom; k < capTo; ++k)
+                        {
+                            if (written + 1 >= outSize)
+                                return false;
+                            out[written++] = original[k];
+                        }
                     }
                     ++next;
                     continue;
@@ -531,6 +576,29 @@ namespace translate
                 return false;
             out[written] = 0;
             return true;
+        }
+
+        // Caller holds g_mutex.  One more look-up for a capture a TEMPLATE just
+        // handed back: exact entries first, then the marked fragments - and
+        // deliberately NOT the templates, because this input came out of a
+        // template and matching another one is the only way it could recurse.
+        //
+        // Returns false when nothing matched; the caller then copies the capture
+        // out byte for byte, exactly like an exact-entry miss.
+        bool LookupCaptureLocked(const char* lowerKey, const char* original,
+            char* out, size_t outSize)
+        {
+            const auto it = g_dict.find(lowerKey);
+            if (it != g_dict.end())
+            {
+                if (it->second.size() + 1 > outSize)
+                    return false;
+                memcpy(out, it->second.c_str(), it->second.size() + 1);
+                return true;
+            }
+            if (!g_fragments.empty())
+                return ComposeFragments(lowerKey, original, out, outSize);
+            return false;
         }
 
         // Caller holds g_mutex.  Exact entries first, then templates

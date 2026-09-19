@@ -86,14 +86,30 @@ def match_template(parts, key):
     return caps
 
 
-def render2(value, original, caps):
+def render2(value, original, caps, exact, fragments):
+    """复刻 C++ RenderTemplate，含 2026-09-19 新增的「捕获段再过一次查表」。
+
+    捕获段先按 `LookupCaptureLocked` 的语义查一遍（**只走精确 + 片段，不走模板** ——
+    模板里再进模板就是递归），命中就写译文，否则原样抄。这样
+    `... settings profile: Rogue Run: Black Ops 3` 里的 `black ops 3` 片段也能生效。
+    """
     res = bytearray()
     nxt = 0
     for ch in value:
         if ch == 0x2A:
             if nxt < len(caps):
                 a, b = caps[nxt]
-                res += original[a:b]
+                cap = original[a:b]
+                if 0 < len(cap) < 1024:
+                    low = cap.lower()   # bytes.lower() 只动 A-Z，与 C++ LowerInPlace 同口径
+                    sub = exact.get(low)
+                    if sub is not None:
+                        res += sub
+                    else:
+                        comp = compose_fragments(cap, low, fragments)
+                        res += comp if comp is not None else cap
+                else:
+                    res += cap
                 nxt += 1
             continue
         res.append(ch)
@@ -132,7 +148,7 @@ def translate_run(run, exact, patterns, fragments):
     for parts, value in patterns:
         caps = match_template(parts, key)
         if caps is not None:
-            return render2(value, run, caps)
+            return render2(value, run, caps, exact, fragments)
     return compose_fragments(run, key, fragments)
 
 
