@@ -20,10 +20,8 @@ T7Patch is a community security / anti-crash patch for Call of Duty: Black Ops I
     is established (rooms and lobbies included); the main menu and Campaign are never affected
   - On a game that is not running in Chinese the feature switches itself off at start-up (a
     non-Chinese install has no Chinese glyphs, so the text would show up as boxes)
-- **Custom map language compatibility**: fills in the language files a Steam Workshop map is
-  missing, so a map that shipped only some languages no longer fails with `Could not find zone`
-  for everyone else. Handled automatically at start-up, no manual step; it only adds what is absent
-  (never modifies the map's own files) and re-checks after a map update
+- **Custom map language compatibility**: fixes maps that cannot be entered because of missing
+  language files
 - **Optional Vulkan rendering backend (DXVK)**: fetched from the menu's *Graphics* page (each file
   is verified after download), then turned on with the switch beside it and applied on the next
   launch; a Vulkan-capable GPU driver is required
