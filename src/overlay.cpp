@@ -217,6 +217,10 @@ namespace
     }
 
     LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// [LOCAL] 定义在文件下方（HookWndProcLocked 旁边），但 Init 里要调用 ⇒ 需要前置声明
+// （漏了它就是 error C3861 找不到标识符，2026-09-19 实测踩过）。
+void HookCursorApisLocked();
     HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags);
 
     // -----------------------------------------------------------------
@@ -787,6 +791,12 @@ namespace
         // the constraints lock out edges-dragging, and the NoScrollbar flags
         // keep the chrome clean.  Width was trimmed ~14% (fields do not need
         // that much room); height has slack so nothing gets clipped.
+        // [LOCAL] 半透明遮罩（用户 2026-09-19 反馈："还没做打开时的半透明遮罩"）：
+        // 菜单打开时把整个画面压暗，把面板和游戏画面分开。用**背景绘制列表**画 —— 它在 NewFrame 之后、
+        // Render 之前可用，属于最底层，不会挤占面板布局（放进窗口里会多一个子区域）。
+        ImGui::GetBackgroundDrawList()->AddRectFilled(
+            ImVec2(0.0f, 0.0f), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, 140));
+
         const ImVec2 kPanelSize(395.0f, 440.0f);
         ImGui::SetNextWindowSize(kPanelSize, ImGuiCond_Always);
         ImGui::SetNextWindowSizeConstraints(kPanelSize, kPanelSize);
@@ -1528,6 +1538,10 @@ namespace
         // (and so a failed overlay init does not leak the texture).
         CreateLinkIconTextureLocked();
 
+        // [LOCAL] 装第二层鼠标 hook（见 HookCursorApisLocked 上方说明）。放在 ImGui 初始化之后、
+        // 开门（g_imguiReady）之前 —— 它不依赖 ImGui，这个位置只是让日志顺序更好读。
+        HookCursorApisLocked();
+
         g_imguiReady = true;
         // [LOCAL] menu_auto_open fires later, on the first DLC ownership
         // query (main menu reached) - see NotifyMainMenuReached().
@@ -1538,6 +1552,92 @@ namespace
         // press (which would show as a visible hitch).
         g_warmupFrames = 2;
         return true;
+    }
+
+    // [LOCAL] 菜单打开时"接管鼠标"的**第二层**（用户 2026-09-19 反馈："鼠标是出来了，但是还是被锁在中间，
+    // 游戏还是能读取到鼠标的移动"）。第一层（Present 里每帧 `ClipCursor(nullptr)` + ImGui 自绘光标）只能让
+    // 光标**露出来** —— 游戏**每帧都会重新** ClipCursor 把光标压回中间，谁后调谁生效，所以我们每帧解一次
+    // 根本压不住。必须**从源头拦**：
+    //   ① `ClipCursor`        —— 游戏调用时直接忽略（菜单开着 ⇒ 永不裁剪）；
+    //   ② `SetCursorPos`      —— 防止游戏每帧把光标拽回屏幕中心；
+    //   ③ `GetRawInputBuffer` —— 游戏读鼠标位移的**轮询**通道（不走 `WM_INPUT`，所以"吞消息"对它无效，
+    //      这正是"游戏还能读到鼠标移动"的原因）。照常调原函数把缓冲**消费掉**（否则关菜单后会一次性涌出
+    //      积压位移、视角猛地甩一下），但对游戏**谎报 0 条**。
+    // ⚠️ 特意**不** hook `GetCursorPos`：`imgui_impl_win32.cpp:337` 靠它算鼠标位置，拦了会把 ImGui 自己的
+    // 光标一起钉死。三个 hook 都只作用于本进程（这个 DLL 就在游戏进程里）。
+    // ⚠️ 每个 hook **首次被调用**时记一行日志 —— 否则"游戏根本没走这条通道"和"hook 没装上"在日志里长得
+    // 一模一样（横幅取证时已经踩过一次这个坑）。
+    using ClipCursorFn = BOOL(WINAPI*)(const RECT*);
+    using SetCursorPosFn = BOOL(WINAPI*)(int, int);
+    using GetRawInputBufferFn = UINT(WINAPI*)(PRAWINPUT, PUINT, UINT);
+    ClipCursorFn g_origClipCursor = nullptr;
+    SetCursorPosFn g_origSetCursorPos = nullptr;
+    GetRawInputBufferFn g_origGetRawInputBuffer = nullptr;
+    std::atomic<bool> g_clipCursorSeen{ false };
+    std::atomic<bool> g_setCursorPosSeen{ false };
+    std::atomic<bool> g_rawInputBufferSeen{ false };
+
+    BOOL WINAPI HookClipCursor(const RECT* lpRect)
+    {
+        if (!g_clipCursorSeen.exchange(true))
+            overlay_log("cursor: game called ClipCursor (hook armed)");
+        if (g_menuOpen.load())
+            return g_origClipCursor ? g_origClipCursor(nullptr) : TRUE; // 菜单开着 ⇒ 永不裁剪
+        return g_origClipCursor ? g_origClipCursor(lpRect) : TRUE;
+    }
+
+    BOOL WINAPI HookSetCursorPos(int x, int y)
+    {
+        if (!g_setCursorPosSeen.exchange(true))
+            overlay_log("cursor: game called SetCursorPos (hook armed)");
+        if (g_menuOpen.load())
+            return TRUE; // 菜单开着 ⇒ 不理会游戏把光标拽回中心
+        return g_origSetCursorPos ? g_origSetCursorPos(x, y) : TRUE;
+    }
+
+    UINT WINAPI HookGetRawInputBuffer(PRAWINPUT pData, PUINT pcbSize, UINT cbSizeHeader)
+    {
+        if (!g_rawInputBufferSeen.exchange(true))
+            overlay_log("cursor: game called GetRawInputBuffer (hook armed)");
+        const UINT count = g_origGetRawInputBuffer
+            ? g_origGetRawInputBuffer(pData, pcbSize, cbSizeHeader) : 0;
+        if (g_menuOpen.load())
+            return 0; // 数据已被消费掉，但对游戏谎称"没有数据"
+        return count;
+    }
+
+    void HookCursorApisLocked()
+    {
+        HMODULE user32 = GetModuleHandleW(L"user32.dll");
+        if (!user32)
+        {
+            overlay_log("cursor: user32 not found - cursor hooks skipped");
+            return;
+        }
+        const LPVOID clipAddr = reinterpret_cast<LPVOID>(GetProcAddress(user32, "ClipCursor"));
+        const LPVOID posAddr = reinterpret_cast<LPVOID>(GetProcAddress(user32, "SetCursorPos"));
+        const LPVOID rawAddr = reinterpret_cast<LPVOID>(GetProcAddress(user32, "GetRawInputBuffer"));
+        MH_STATUS sClip = MH_ERROR_NOT_INITIALIZED;
+        MH_STATUS sPos = MH_ERROR_NOT_INITIALIZED;
+        MH_STATUS sRaw = MH_ERROR_NOT_INITIALIZED;
+        if (clipAddr)
+            sClip = MH_CreateHook(clipAddr, (LPVOID)&HookClipCursor, (LPVOID*)&g_origClipCursor);
+        if (posAddr)
+            sPos = MH_CreateHook(posAddr, (LPVOID)&HookSetCursorPos, (LPVOID*)&g_origSetCursorPos);
+        if (rawAddr)
+            sRaw = MH_CreateHook(rawAddr, (LPVOID)&HookGetRawInputBuffer, (LPVOID*)&g_origGetRawInputBuffer);
+        // 逐个启用（不用 MH_ALL_HOOKS，免得顺带动到别的 hook）。
+        if (clipAddr && sClip == MH_OK)
+            MH_EnableHook(clipAddr);
+        if (posAddr && sPos == MH_OK)
+            MH_EnableHook(posAddr);
+        if (rawAddr && sRaw == MH_OK)
+            MH_EnableHook(rawAddr);
+        char cursorMsg[192]{};
+        snprintf(cursorMsg, sizeof(cursorMsg),
+            "cursor hooks: ClipCursor=%d SetCursorPos=%d GetRawInputBuffer=%d (0=MH_OK)",
+            static_cast<int>(sClip), static_cast<int>(sPos), static_cast<int>(sRaw));
+        overlay_log(cursorMsg);
     }
 
     void HookWndProcLocked()
@@ -1662,8 +1762,23 @@ namespace
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
 
+            // [LOCAL] 菜单打开时**接管鼠标**（用户 2026-09-19 反馈："正在玩的时候打开鼠标还没释放没法操作我们的 UI"）。
+            //   ① `ClipCursor(nullptr)`：游戏把光标裁剪并锁在窗口里（每帧重设）⇒ 我们**每帧压过它**。
+            //      不做这一步，ImGui 拿到的鼠标位置会一直卡在原地，表现就是"面板看得见但点不动"。
+            //   ② `io.MouseDrawCursor = true`：游戏用 `ShowCursor(FALSE)` 把系统光标藏了，而 `ShowCursor`
+            //      是**引用计数**（我们无法可靠地把它顶回可见）⇒ 直接让 ImGui 自绘一个箭头，不依赖系统光标。
+            // 关掉菜单只需撤掉自绘光标：光标裁剪与隐藏游戏自己会恢复，不需要我们做逆操作。
+            ImGuiIO& imguiIo = ImGui::GetIO();
             if (g_menuOpen)
+            {
+                ClipCursor(nullptr);
+                imguiIo.MouseDrawCursor = true;
                 DrawMenu();
+            }
+            else
+            {
+                imguiIo.MouseDrawCursor = false;
+            }
 
             ImGui::Render();
             ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -1820,6 +1935,10 @@ namespace
             case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK:
             case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
             case WM_INPUT: // raw input - BO3 reads mouse movement this way
+                return TRUE;
+            // [LOCAL] 同一道理：菜单开着时别让游戏改光标（BO3 会把光标设成 NULL 藏起来）。
+            // 直接回"已处理"，游戏就没机会把它藏掉，配合 ImGui 自绘光标才能真正点得动。
+            case WM_SETCURSOR:
                 return TRUE;
             }
         }
