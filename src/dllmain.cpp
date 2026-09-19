@@ -1,5 +1,6 @@
 #include "framework.h"
-#include "translate.h"  // [LOCAL] UI translation layer
+#include "translate.h"    // [LOCAL] UI translation layer
+#include "zone_compat.h"  // [LOCAL] custom-map language compatibility
 #include <tlhelp32.h> // [LOCAL] module enumeration for the crash dump
 #include <atomic>     // [LOCAL] one-shot guard on the start-up warning
 
@@ -853,6 +854,15 @@ BOOL APIENTRY DllMain(HMODULE hModule,
         // any game code; the thread below starts as soon as the loader lock is
         // released, and both hides the file and installs the fallback hook.
         CreateThread(nullptr, 0, D3DCBlockEarlyThread, nullptr, 0, nullptr);
+
+        // [LOCAL] Custom maps are packed per language and the engine builds the
+        // zone name from whichever language the game booted in, while most
+        // workshop authors export the English set only.  Creating the missing
+        // names here - before the front-end can be asked to load a map - is
+        // what turns "ERROR: Could not find zone 'sc_zm_...'" into a map that
+        // loads.  It is file I/O, so it runs on its own thread instead of in
+        // this loader-lock context.
+        zone_compat::Start();
         break;
     }
     }

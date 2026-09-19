@@ -185,6 +185,7 @@
     <ClInclude Include="src\structs.h" />
     <ClInclude Include="src\t7patch_log.h" />
     <ClInclude Include="src\translate.h" />
+    <ClInclude Include="src\zone_compat.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_internal.h" />
     <ClInclude Include="imgui\imstb_textedit.h" />
@@ -207,6 +208,7 @@
     <ClCompile Include="src\t7patch_log.cpp" />
     <ResourceCompile Include="src\translate_default.rc" />
     <ClCompile Include="src\translate.cpp" />
+    <ClCompile Include="src\zone_compat.cpp" />
     <ClCompile Include="imgui\imgui.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

@@ -105,6 +105,7 @@ def check_file(rel, exts=('.cpp', '.h')):
 for f in ("Protection.cpp", "Hooks.cpp", "dllmain.cpp", "overlay.cpp",
           "framework.h", "Protection.h", "Hooks.h", "t7patch_log.cpp",
           "translate.cpp", "translate.h",
+          "zone_compat.cpp", "zone_compat.h",
           "dict_update.cpp", "dict_update.h",
           "dxvk_download.cpp", "dxvk_download.h",
           "proxy/Proxy.cpp", "proxy/d3d11.def"):
@@ -116,6 +117,7 @@ for f in ("Protection.cpp", "Hooks.cpp", "dllmain.cpp", "overlay.cpp",
 src = {f: io.open(os.path.join(ROOT, f), 'r', encoding='utf-8', newline='').read()
        for f in ("Protection.cpp", "Hooks.cpp", "overlay.cpp",
                  "translate.cpp", "translate.h",
+                 "zone_compat.cpp", "zone_compat.h",
                  "dict_update.cpp", "dict_update.h",
                  "dxvk_download.cpp", "dxvk_download.h",
                  "proxy/d3d11.def", "t7patch_log.cpp", "framework.h",
