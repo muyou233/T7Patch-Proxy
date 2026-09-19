@@ -784,7 +784,8 @@ struct patch_config
         K_DEV_TOOLS = 1u << 8,
         K_SKIP_PVP = 1u << 9,
         K_SKIP_ZM = 1u << 10,
-        K_ALL = (1u << 11) - 1,
+        K_ENGLISH_FALLBACK = 1u << 11,
+        K_ALL = (1u << 12) - 1,
     };
 
     char playername[16];
@@ -838,6 +839,13 @@ struct patch_config
     // "do not translate right now" - see SetSceneBlocked in translate.cpp.
     int skip_pvp;
     int skip_zm;
+    // [LOCAL] 1 = the garbled-text switch.  A workshop map can bring its OWN
+    // font, and that font outranks the game's for every string the map draws -
+    // with Latin glyphs only, every Chinese string draws as a row of boxes.
+    // Stepping aside is not enough: that only restores text we translated
+    // ourselves, while what the game and the map wrote is Chinese to begin
+    // with.  So that text gets translated word by word instead.
+    int english_fallback;
     // [LOCAL] Which of the keys above the last loadfrom() found in the file, and
     // K_ALL once saveto() has written it.  Starts at 0 ("nothing read yet"), so
     // a freshly constructed object - a first run with no file at all - is never
@@ -869,6 +877,7 @@ struct patch_config
         int dev_tools;
         int skip_pvp;
         int skip_zm;
+        int english_fallback;
         unsigned keys_seen;
     };
 
@@ -890,6 +899,7 @@ struct patch_config
         dev_tools = 0;
         skip_pvp = 1;       // ...and a Multiplayer match is the one scene it stays off in
         skip_zm = 0;        // Zombies is translated like everything else
+        english_fallback = 0; // replace normally; the garbled-text switch is opt-in
         keys_seen = 0;      // nothing read from a file yet
         exists = false;
         modified = std::filesystem::file_time_type();
@@ -916,6 +926,7 @@ struct patch_config
         v.dev_tools = dev_tools;
         v.skip_pvp = skip_pvp;
         v.skip_zm = skip_zm;
+        v.english_fallback = english_fallback;
         v.keys_seen = keys_seen;
     }
 
@@ -932,6 +943,7 @@ struct patch_config
         dev_tools = v.dev_tools;
         skip_pvp = v.skip_pvp;
         skip_zm = v.skip_zm;
+        english_fallback = v.english_fallback;
         keys_seen = v.keys_seen;
     }
 
@@ -1046,6 +1058,12 @@ struct patch_config
 
         outfile << "# UI 翻译：1/0开启关闭（把英文界面文本替换为 T7Patch\\translate_zh.txt 里的中文；游戏需为中文，简体/繁体均可。启动时若游戏语言不是中文，补丁会自动关掉它并把这一项改回 0）" << std::endl;
         outfile << "translate=" << v.translate << std::endl;
+        outfile << std::endl;
+
+
+
+        outfile << "# 修复文字异常 1/0开启关闭（默认关。用于兼容地图无中文字型导致的（口口口）显示异常）" << std::endl;
+        outfile << "english_fallback=" << v.english_fallback << std::endl;
         outfile << std::endl;
 
         outfile << "# 关闭多人对局翻译 1/0开启关闭（默认开：多人对局不翻译；建立对局后生效，主菜单不受影响）" << std::endl;
@@ -1300,6 +1318,19 @@ struct patch_config
                 }
             }
             break;
+
+            case FNV32("english_fallback"):
+            {
+                v.keys_seen |= K_ENGLISH_FALLBACK;
+                std::istringstream ivalread(val);
+                ivalread >> v.english_fallback;
+                if (ivalread.fail())
+                {
+                    v.english_fallback = 0; // default: replace normally
+                }
+            }
+            break;
+
             case FNV32("skip_zm"):
             {
                 v.keys_seen |= K_SKIP_ZM;
@@ -1431,7 +1462,17 @@ bool t7patch_cfg_translate_enabled()
     // the menu draws, so the switch can never read ON while the layer is held
     // off.  The stored value is deliberately left alone (see above).
     std::lock_guard<std::mutex> lock(g_config_mutex);
-    return !g_translate_language_block.load() && user_config.translate != 0;
+    if (user_config.translate == 0)
+        return false;
+    // [LOCAL] The start-up language gate exists because every replacement in the
+    // Chinese dictionary needs CJK glyphs that a non-Chinese language pack does
+    // not ship - on such a game it could only paint boxes.  The garbled-text
+    // switch is plain ASCII and renders on any pack, so the gate must NOT block
+    // it: otherwise the very case it exists for (an English game, a map whose
+    // own font has no Chinese glyphs) could never be switched on.
+    if (user_config.english_fallback != 0)
+        return true;
+    return !g_translate_language_block.load();
 }
 
 bool t7patch_cfg_dev_tools()
@@ -1468,6 +1509,22 @@ void t7patch_cfg_set_skip_zm(int skip)
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.skip_zm = skip ? 1 : 0;
+}
+
+// [LOCAL] 2026-09-19: leave the current map's text alone (see framework.h).
+// Nothing here reloads a dictionary - the flag is read straight off the
+// config by the translate layer, so flipping it takes effect on the next
+// string the game draws.
+bool t7patch_cfg_english_fallback()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.english_fallback != 0;
+}
+
+void t7patch_cfg_set_english_fallback(int on)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.english_fallback = on ? 1 : 0;
 }
 
 // [LOCAL] Toggle the translation layer from the menu (page 2, next to the

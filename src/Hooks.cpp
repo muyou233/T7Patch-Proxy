@@ -466,8 +466,10 @@ namespace hooks {
 			// [LOCAL] UI translation layer.  Whole-string exact match only: a
 			// miss leaves the original text untouched, so a partial match can
 			// never corrupt unrelated UI text.  Collect() runs first and stores
-			// the ENGLISH source (it skips strings that already carry non-ASCII
-			// bytes), then the dictionary replaces it for display.
+			// the source text - since 2026-09-19 it records runs carrying CJK
+			// too (the game's own Chinese; it used to skip them), which is what
+			// makes the in-game boxes diagnosable at all - then the dictionary
+			// replaces it for display.
 			translate::Collect(input);
 			if (translate::Enabled())
 			{
@@ -666,6 +668,16 @@ namespace hooks {
 			char flags, char* text, __int64 font, float fontHeight, float wrapWidth, float alignment,
 			char luaVM, __int64* element)
 		{
+			// [LOCAL] 2026-09-19：这里也要采集。
+			// **这是唯一能看到游戏内文字的 hook** —— HUD、购买提示（`Hold ^3F^7 for …` 那种）
+			// 只走这一条；那两条前端字符串 hook 看不到它们，这正是 offsets.h 里
+			// 「我们那两条字符串 hook 看不到的一条通道」的意思。少了这一句，
+			// **游戏自己在对局内的中文就永远采不到**（实测：`Hold` / `Cost` 在采集里全是 no）。
+			// 用的是与前端完全相同的 translate::Collect()，同样放在 Enabled() 门**外面**
+			// —— 采集是"观察"，不是"翻译"，关掉汉化时也该照常记录。
+			if (text && text[0])
+				translate::Collect(text);
+
 			// 翻译（write-through）：命中时把**我们自己的**串传下去；未开、未命中或放不下 ⇒ 原串照旧。
 			// 门控用的是 translate::Enabled()，和其它两条 hook 完全一致（含「模组汉化」开关与场景门）。
 			char* outgoing = text;

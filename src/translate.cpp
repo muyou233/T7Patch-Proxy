@@ -8,6 +8,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -16,10 +19,18 @@
 
 namespace translate
 {
+    // [LOCAL] 2026-09-20: declared at this scope because the anonymous
+    // namespace below calls them, while their definitions sit further down
+    // (next to the loaders themselves, outside the anonymous namespace).
+    void LoadHanziTable();
+    void RefreshFallbackTablesIfChanged();
+
     namespace
     {
         // Exact entries: lower-cased English source -> translation.
         std::unordered_map<std::string, std::string> g_dict;
+
+
 
         // Template entries (keys containing '*'), for the UI text that carries
         // data the dictionary can never enumerate: "LEVEL 46", "Most Used: HVK-30",
@@ -76,6 +87,15 @@ namespace translate
         // at most once a second.
         std::atomic<bool> g_sceneBlocked{ false };
 
+        // [LOCAL] 2026-09-19: the player told us this map's own font cannot draw
+        // what we would write, so replace nothing here - the English original
+        // is what that font CAN draw.  Kept as an atomic next to g_sceneBlocked
+        // for the same reason: the render thread reads it for every string,
+        // while the config write happens at most once a settings apply.
+        std::atomic<bool> g_englishFallback{ false };
+
+
+
         // [LOCAL] Diagnostics.  "I turned translation on and nothing happened"
         // has to be answerable from the log alone: these lines say whether the
         // switch was seen, which dictionary won, and whether lookups ever match.
@@ -111,6 +131,11 @@ namespace translate
         std::atomic<unsigned long long> g_lastPollMs{ 0 };
         std::atomic<bool> g_reloadRequested{ false }; // set by the updater, see RequestReload
         unsigned long long g_dictStamp = 0; // guarded by g_mutex
+
+        // NOTE: the fallback table loaders are declared at translate:: scope
+        // (see just below "namespace translate"), NOT inside this anonymous
+        // namespace - a declaration in here would name a different function and
+        // every call to it would be ambiguous.
 
         // [LOCAL] The start-up language gate runs once per session - see the
         // note at the top of Init().  exchange() is the guard, so two racing
@@ -239,6 +264,10 @@ namespace translate
             char dir[MAX_PATH * 2] = {};
             if (!BuildDataDir(dir, sizeof(dir)))
                 return false;
+            // Only one dictionary ships now: the Chinese one.  A pinyin variant
+            // used to sit next to it for maps whose own font has no CJK glyphs;
+            // that was dropped - the garbled-text switch turns the Chinese back
+            // into English instead, which reads better.
             const int n = snprintf(pathOut, pathSize, "%s\\translate_zh.txt", dir);
             return n > 0 && static_cast<size_t>(n) < pathSize;
         }
@@ -601,12 +630,305 @@ namespace translate
             return false;
         }
 
+        // [LOCAL] 2026-09-19: turn Chinese back into English, word by word.
+        //
+        // The English switch cannot simply step aside.  Stepping aside only
+        // brings OUR replacements back to English - those had an English
+        // original to begin with.  Strings the game and the map wrote themselves
+        // are Chinese and STAY Chinese, and a map whose font has no CJK glyphs
+        // draws them as boxes no matter what we do.  So they get translated
+        // here, using the dictionary reversed (tools/make_zh_to_en.py).  Words
+        // the table does not know are left as they are - those stay Chinese,
+        // which is the one case this switch cannot help with.
+        //
+        // Longest match wins, walking left to right, so a table holding both
+        // "剩余" and "剩余敌人" picks the longer one.
+        // [LOCAL] Full-width punctuation lives in the CJK ranges, so a font with
+        // Latin glyphs only draws it as a box exactly like a Han character does.
+        // These are the ones the game actually emits, each mapped to its ASCII
+        // counterpart.  "…" expands to three characters, which is why this
+        // returns a string rather than a char.
+        const char* AsciiForFullWidth(const char* ch)
+        {
+            struct Pair { const char* from; const char* to; };
+            static const Pair kPairs[] = {
+                { "，", "," }, { "。", "." }, { "！", "!" }, { "？", "?" },
+                { "：", ":" }, { "；", ";" }, { "、", "," }, { "（", "(" },
+                { "）", ")" }, { "「", "\"" }, { "」", "\"" }, { "『", "\"" },
+                { "』", "\"" }, { "【", "[" }, { "】", "]" }, { "《", "<" },
+                { "》", ">" }, { "—", "-" }, { "–", "-" }, { "～", "~" },
+                { "…", "..." }, { "　", " " }, { "“", "\"" }, { "”", "\"" },
+                { "‘", "'" }, { "’", "'" }, { "％", "%" },
+            };
+            for (const Pair& kv : kPairs)
+                if (memcmp(ch, kv.from, 3) == 0)
+                    return kv.to;
+            return nullptr;
+        }
+
+        // [LOCAL] The fallback writes its English in capitals on purpose - it is
+        // standing in for text the map cannot draw, and block capitals sit
+        // better next to the game's own all-caps labels.  ONLY what the table
+        // produced is upper-cased; text copied through untouched keeps whatever
+        // case the game or the map gave it.
+        void CopyUpper(const char* from, char* to)
+        {
+            while (*from)
+            {
+                const unsigned char c = static_cast<unsigned char>(*from++);
+                *to++ = static_cast<char>(c >= 'a' && c <= 'z' ? c - 32 : c);
+            }
+            *to = 0;
+        }
+
+        // ASCII letter or digit - the only characters that need a space between
+        // them when two translated words end up adjacent.  Punctuation, Han
+        // characters and control bytes all glue fine.
+        bool IsAsciiAlnum(char c)
+        {
+            return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')
+                || (c >= 'a' && c <= 'z');
+        }
+
+        // [LOCAL] 2026-09-20: memoized per-run translations for the fallback
+        // switch.  The same label is drawn EVERY frame, and the table walk is
+        // dozens of hashes per run - at the official maps' text volume that was
+        // enough to stall the render thread (BlackOps3.exe went unresponsive at
+        // 0:55 with the uncached 45-byte walk).  Guarded by g_mutex, which the
+        // caller holds; cleared when the table reloads.
+        constexpr size_t kRenderCacheMax = 2048;
+        std::unordered_map<std::string, std::string> g_renderCache;
+
+        // [LOCAL] 2026-09-20: one Han character -> its pinyin (camel case, one
+        // syllable per entry).  The map-safe switch spells Chinese out with it,
+        // character by character - replacement cannot reorder a sentence the
+        // way English translation does, needs no phrase table, and covers every
+        // character GB2312 lists, so nothing is ever left as boxes.
+        std::unordered_map<std::string, std::string> g_hanzi;
+        unsigned long long g_hanziStamp = 0; // guarded by g_mutex
+
+        // sourceLen is the length of THIS RUN, which is not strlen(source): the
+        // hooks hand over a pointer into the middle of a longer label, so the
+        // bytes after the run belong to the next one.
+        bool RenderPinyinInner(const char* source, size_t sourceLen, char* out,
+            size_t outSize)
+        {
+            const unsigned char* p = reinterpret_cast<const unsigned char*>(source);
+            const size_t total = sourceLen;
+
+            // A run without a single Han character has nothing to spell out -
+            // skip the whole walk for it.  Front-end labels are often pure
+            // ASCII and this is the cheap way out for those.
+            bool hasHan = false;
+            for (size_t i = 0; i < total; ++i)
+            {
+                if (p[i] >= 0xE0)
+                {
+                    hasHan = true;
+                    break;
+                }
+            }
+            if (!hasHan)
+                return false;
+
+            size_t written = 0;
+            bool converted = false;
+            // True right after a syllable was written: the NEXT syllable needs
+            // a space before it ("Dan Yao", never "DanYao"), and so does plain
+            // ASCII the run already had ("An" then "ENTER" stays two words).
+            bool afterWord = false;
+
+            for (size_t at = 0; at < total;)
+            {
+                    // Six                 // UTF-8 length from the lead byte, verified against the
+                    // continuation range so a stray byte cannot swallow its
+                    // neighbour.
+                    size_t len = 1;
+                    if ((p[at] & 0xE0u) == 0xC0u)
+                        len = 2;
+                    else if ((p[at] & 0xF0u) == 0xE0u)
+                        len = 3;
+                    else if ((p[at] & 0xF8u) == 0xF0u)
+                        len = 4;
+                    for (size_t i = 1; i < len && at + i < total; ++i)
+                    {
+                        if ((p[at + i] & 0xC0) != 0x80)
+                        {
+                            len = 1;
+                            break;
+                        }
+                    }
+                    if (at + len > total)
+                        len = total - at;
+
+                    // Multi-character phrases first: a 多音字 needs context - "重建"
+                    // is Chong Jian, never Zhong.  The table carries the common
+                    // phrase readings; longest match beats the single characters
+                    // below.  (Cap 18 bytes = 6 characters.  'pl-- > 6', not
+                    // 'pl >= 6; --pl': size_t would wrap past zero and loop forever.)
+                    if (len >= 6)
+                    {
+                        size_t maxLen = 18;
+                        if (maxLen > total - at)
+                            maxLen = total - at;
+                        bool phraseHit = false;
+                        for (size_t pl = maxLen + 1; pl-- > 6; )
+                        {
+                            if ((p[at + pl] & 0xC0) == 0x80)
+                                continue;
+                            char cand[19] = {};
+                            memcpy(cand, p + at, pl);
+                            const auto pit = g_hanzi.find(cand);
+                            if (pit == g_hanzi.end())
+                                continue;
+                            const std::string& v = pit->second; // may hold spaces
+                            if (written && IsAsciiAlnum(out[written - 1]))
+                            {
+                                if (written + v.size() + 2 > outSize)
+                                    return false;
+                                out[written++] = ' ';
+                            }
+                            else if (written + v.size() + 1 > outSize)
+                                return false;
+                            memcpy(out + written, v.c_str(), v.size());
+                            written += v.size();
+                            at += pl;
+                            converted = true;
+                            afterWord = true;
+                            phraseHit = true;
+                            break;
+                        }
+                        if (phraseHit)
+                            continue;
+                    }
+
+                    if (len == 3)
+                    {
+                        char ch[4] = {};
+                        memcpy(ch, p + at, 3);
+                        if (const char* ascii = AsciiForFullWidth(ch))
+                        {
+                            const size_t n = strlen(ascii);
+                            if (written + n + 1 > outSize)
+                                return false;
+                            memcpy(out + written, ascii, n);
+                            written += n;
+                            at += 3;
+                            converted = true;
+                            afterWord = false; // punctuation closes a word
+                            continue;
+                        }
+
+                        // A Han character: spell it out.  The space before the
+                        // syllable - after the previous syllable, or after ASCII
+                        // the run already had - is what keeps "DanYaoQuanMan"
+                        // readable as "Dan Yao Quan Man".
+                        const auto hit = g_hanzi.find(std::string(ch, 3));
+                        if (hit != g_hanzi.end())
+                        {
+                            const size_t n = hit->second.size();
+                            if (written && IsAsciiAlnum(out[written - 1]))
+                            {
+                                if (written + n + 2 > outSize)
+                                    return false;
+                                out[written++] = ' ';
+                            }
+                            else if (written + n + 1 > outSize)
+                                return false;
+                            memcpy(out + written, hit->second.c_str(), n);
+                            written += n;
+                            at += 3;
+                            converted = true;
+                            afterWord = true;
+                            continue;
+                        }
+                    }
+
+                    // Not in the table, or not a Han character: copy through as it
+                    // is - ASCII the run already had, a rare ideograph outside the
+                    // table, a typographic quote.  Nothing here needs a space.
+                    if (afterWord)
+                    {
+                        if (IsAsciiAlnum(char(p[at])))
+                        {
+                            if (written + len + 2 > outSize)
+                                return false;
+                            out[written++] = ' ';
+                        }
+                        afterWord = false;
+                    }
+                    if (written + len + 1 > outSize)
+                        return false;
+                    memcpy(out + written, p + at, len);
+                    written += len;
+                    at += len;
+                    }
+
+                    if (!converted)
+                    return false; // nothing to spell out - the caller keeps it
+                    out[written] = 0;
+                    return true;
+                    }
+
+        // [LOCAL] 2026-09-20: memoizing wrapper.  The same label is redrawn
+        // EVERY frame, and without this the table walk - up to 40 hashes per
+        // run, each building a temporary std::string - ran at the official
+        // maps' text volume and stalled the render thread far enough for
+        // Windows to call the game unresponsive.  With it the walk happens
+        // once per distinct run and every redraw after that is one hash
+        // lookup.  Callers hold g_mutex; the cache is dropped whenever the
+        // table it was built from reloads.
+        bool RenderPinyin(const char* source, size_t sourceLen, char* out, size_t outSize)
+        {
+            if (!g_englishFallback.load() || g_hanzi.empty())
+                return false;
+
+            std::string key(source, sourceLen);
+            const auto cached = g_renderCache.find(key);
+            if (cached != g_renderCache.end())
+            {
+                const std::string& v = cached->second;
+                if (v.empty())
+                    return false; // a remembered miss: leave the run alone
+                if (v.size() + 1 > outSize)
+                    return false;
+                memcpy(out, v.c_str(), v.size() + 1);
+                return true;
+            }
+
+            char buf[4096]; // a run is at most kRunMax and each syllable adds a
+                            // handful of bytes, so this never runs out in practice
+            const bool ok = RenderPinyinInner(source, sourceLen, buf, sizeof(buf));
+            if (g_renderCache.size() >= kRenderCacheMax)
+                g_renderCache.clear(); // simple bound; the UI refills it within a frame
+            if (ok)
+                g_renderCache.emplace(key, buf);
+            else
+                g_renderCache.emplace(key, std::string());
+            if (!ok)
+                return false;
+            const size_t n = strlen(buf);
+            if (n + 1 > outSize)
+                return false;
+            memcpy(out, buf, n + 1);
+            return true;
+        }
+
         // Caller holds g_mutex.  Exact entries first, then templates
         // narrow-to-wide, then the marked fragments (composition) - the most
         // specific rule always gets the first say.
-        bool LookupKeyLocked(const char* lowerKey, const char* original, char* out,
-            size_t outSize)
+        bool LookupKeyLocked(const char* lowerKey, const char* original, size_t originalLen,
+            char* out, size_t outSize)
         {
+            // [LOCAL] The garbled-text switch.  On a map whose own font cannot
+            // draw Chinese the dictionary must not run at all - its Chinese
+            // output is exactly what turns into boxes.  Every Han character is
+            // spelled out in pinyin instead (user's final call: per-character
+            // replacement cannot reorder a sentence and needs no phrase table),
+            // while anything we never touched was English to begin with.
+            if (g_englishFallback.load())
+                return RenderPinyin(original, originalLen, out, outSize);
+
             const auto it = g_dict.find(lowerKey);
             if (it != g_dict.end())
             {
@@ -955,6 +1277,15 @@ namespace translate
                 return;
             g_lastPollMs.store(now);
 
+            // [LOCAL] 2026-09-20: the English fallback switch reads its own two
+            // tables, and until now nothing watched them - they were read once in
+            // Init() and then stayed as they were.  Editing a word table looked
+            // like it did nothing at all until the game was restarted or the
+            // settings were applied, which is exactly what it was doing.  They
+            // are polled here with the same interval, and the same "only on
+            // change" rule.
+            RefreshFallbackTablesIfChanged();
+
             char path[MAX_PATH * 2] = {};
             if (!BuildDictionaryPath(path, sizeof(path)))
                 return;
@@ -997,6 +1328,80 @@ namespace translate
             fclose(f);
         }
 
+    }
+
+    // [LOCAL] 2026-09-20: keeps the pinyin table in step with the file while
+    // the game runs.  It is the table a collected string is added to, so "I
+    // edited the word list and nothing happened" was the normal result before
+    // this - the table was only ever read from Init(), which needs the
+    // settings to be applied or the game to be restarted.
+    // [LOCAL] 2026-09-20: the per-character pinyin table the map-safe switch
+    // renders with.  One syllable per entry ("An"); the engine spaces the
+    // syllables itself.  GB2312 scope (no rare ideographs) - see the generator.
+    void LoadHanziTable()
+    {
+        char dir[MAX_PATH * 2] = {};
+        if (!BuildDataDir(dir, sizeof(dir)))
+            return;
+
+        char path[MAX_PATH * 2] = {};
+        const int n = snprintf(path, sizeof(path), "%s\\translate_pinyin.txt", dir);
+        if (n <= 0 || static_cast<size_t>(n) >= sizeof(path))
+            return;
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in)
+        {
+            Logf("init: no pinyin table (%s) - Chinese cannot be spelled out", path);
+            return;
+        }
+
+        std::unordered_map<std::string, std::string> table;
+        std::string line;
+        while (std::getline(in, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            if (line.empty() || line[0] == '#')
+                continue;
+            const size_t eq = line.find('=');
+            if (eq == std::string::npos || eq == 0 || eq + 1 >= line.size())
+                continue;
+            table[line.substr(0, eq)] = line.substr(eq + 1);
+        }
+
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_hanzi.swap(table);
+        g_hanziStamp = FileStamp(path);
+        g_renderCache.clear(); // the memoized answers were built from the old table
+        Logf("init: pinyin table %u character(s) loaded",
+            static_cast<unsigned>(g_hanzi.size()));
+    }
+
+    void RefreshFallbackTablesIfChanged()
+    {
+        char dir[MAX_PATH * 2] = {};
+        if (!BuildDataDir(dir, sizeof(dir)))
+            return;
+
+        // The same path LoadHanziTable builds.
+        char zhPath[MAX_PATH * 2] = {};
+        const int b = snprintf(zhPath, sizeof(zhPath), "%s\\translate_pinyin.txt", dir);
+        if (b <= 0 || static_cast<size_t>(b) >= sizeof(zhPath))
+            return;
+
+        const unsigned long long zhStamp = FileStamp(zhPath);
+
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (zhStamp == g_hanziStamp)
+                return; // unchanged - nothing to re-read
+        }
+
+        // Re-read whole: the loader latches its own stamp, quietly this time.
+        LoadHanziTable();
+        Logf("english fallback: pinyin table reloaded (%u characters)",
+            static_cast<unsigned>(g_hanzi.size()));
     }
 
     void Init()
@@ -1055,10 +1460,19 @@ namespace translate
 
         const bool wantTranslate = t7patch_cfg_translate_enabled();
         const bool wantCollect = t7patch_cfg_dev_tools();
+        // Read before the early-outs below: the map-safe switch has to follow the
+        // config even while translation itself is off, otherwise turning it back
+        // on would silently resurrect replacements on a map the player exempted.
+        g_englishFallback.store(t7patch_cfg_english_fallback());
         // exchange, not load-then-store: the PREVIOUS collect flag is part of
         // the change-detection key below, so a flipped dev_tools still
         // falls through to a real (re)load and gets its log line.
         const bool prevCollect = g_collect.exchange(wantCollect);
+
+        // [LOCAL] Loaded BEFORE the early-outs below: the map-safe switch reads
+        // this table, and it is meant to work for a player whose only problem is
+        // one map's font - they may well run with the dictionary switched off.
+        LoadHanziTable();
 
         if (!wantTranslate)
         {
@@ -1120,7 +1534,15 @@ namespace translate
         // moment one the player asked to leave alone.  Folding the scene gate in
         // HERE is what keeps Hooks.cpp untouched - both hooks and the collector
         // already ask Enabled().
-        return g_enabled.load() && !g_sceneBlocked.load();
+        // The garbled-text switch is not folded in as a plain "off": it does not
+        // silence the layer, it replaces what the layer does (see LookupKeyLocked
+        // - English passes through, Chinese is translated word by word).
+        //
+        // It can hold the gate open on its own, though, because that mode never
+        // touches the dictionary: a player running with translation off can
+        // still make one unreadable map readable.
+        const bool layerOn = g_enabled.load() || g_englishFallback.load();
+        return layerOn && !g_sceneBlocked.load();
     }
 
     void SetSceneBlocked(bool blocked)
@@ -1186,7 +1608,7 @@ namespace translate
                 LowerInPlace(key);
 
                 std::lock_guard<std::mutex> lock(g_mutex);
-                hit = LookupKeyLocked(key, run.body, replacement, sizeof(replacement));
+                hit = LookupKeyLocked(key, run.body, run.length, replacement, sizeof(replacement));
             }
 
             if (hit)
@@ -1268,10 +1690,14 @@ namespace translate
             memcpy(clean, run.body, run.length);
             clean[run.length] = 0;
 
-            // English sources only: a run without an ASCII letter is a number or
-            // a symbol, and one carrying CJK is the game's own Chinese (see
-            // HasCjk).
-            if (!HasAsciiLetter(clean) || HasCjk(clean))
+            // [LOCAL] 2026-09-19 probe: record the game's OWN Chinese too.
+            // Collection used to skip CJK runs ("they are the game's own
+            // Chinese" - see HasCjk), which is exactly why we had no list of
+            // them.  On a map whose font lacks CJK glyphs those runs draw as
+            // boxes just like our replacements do, and the only way to say
+            // anything about them is to see them first.  Bare numbers and
+            // symbols (neither an ASCII letter nor CJK) are still skipped.
+            if (!HasAsciiLetter(clean) && !HasCjk(clean))
                 continue;
 
             std::lock_guard<std::mutex> lock(g_mutex);

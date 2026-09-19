@@ -369,6 +369,12 @@ void HookCursorApisLocked();
         const char* dxvkHudMemory;
         const char* dxvkHudCompiler;
         const char* dxvkHudDevinfo;
+        // [LOCAL] Garbled-text switch (2026-09-19).  Tailed for the same
+        // positional-table reason as everything above: a map that brought its
+        // own Latin-only font cannot draw ANY Chinese, so the Chinese such a map
+        // does show has to be translated back into English.
+        const char* englishFallback;
+        const char* englishFallbackTip;
     };
 
     constexpr MenuText kTextZh = {
@@ -428,7 +434,10 @@ void HookCursorApisLocked();
         "适合原本就卡顿的游戏：它在后台线程编译着色器，减少「边玩边编」引起的一顿一顿。\n"
         "需要显卡已装 Vulkan 驱动；改动重启游戏后生效。",
         // HUD 逐项（09-17 用户要求）：每一项都短，两行刚好放得下六个。
-        "帧率", "帧时间", "GPU 负载", "显存", "着色器", "设备"
+        "帧率", "帧时间", "GPU 负载", "显存", "着色器", "设备",
+        // 修复文字异常（09-19）。⚠️ 追加在**表尾**：两张表按位置对应，插中间会静默错位。
+        "修复文字异常",
+        "用于兼容地图无中文字型导致的（口口口）显示异常。"
     };
     constexpr MenuText kTextEn = {
         "SETTINGS", "TOGGLES", "STATUS", "CONFIG",
@@ -485,7 +494,9 @@ void HookCursorApisLocked();
         "Worth trying when the game already stutters - it compiles shaders on worker\n"
         "threads, which cuts the hitches caused by compiling them while you play.\n"
         "Needs a Vulkan driver installed; takes effect after a restart.",
-        "FPS", "Frametime", "GPU load", "VRAM", "Shaders", "Device"
+        "FPS", "Frametime", "GPU load", "VRAM", "Shaders", "Device",
+        "Fix garbled text",
+        "For maps that ship no Chinese font, where text shows up as boxes (口口口)."
     };
 
     const MenuText* L()
@@ -1130,6 +1141,19 @@ void HookCursorApisLocked();
                     t7patch_config_save();
                 }
                 ImGui::SetItemTooltip("%s", L()->zmSkipTip);
+                tree.Row();
+
+                // [LOCAL] Garbled-text switch (2026-09-19).  It sits with the
+                // other translation switches because it answers the same
+                // question they do: what should this map's text look like on
+                // screen right now.
+                bool englishFallback = t7patch_cfg_english_fallback();
+                if (SolidCheckbox(L()->englishFallback, &englishFallback))
+                {
+                    t7patch_cfg_set_english_fallback(englishFallback ? 1 : 0);
+                    t7patch_config_save();
+                }
+                ImGui::SetItemTooltip("%s", L()->englishFallbackTip);
                 tree.Row();
                 tree.Draw();
 

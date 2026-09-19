@@ -1677,4 +1677,21 @@ fifty floors. the staircase spirals up the [b]outside[/b] of the tower - open ai
 ~village entrance=村庄入口
 ~conference room=会议室
 ~right hallway=右侧走廊
+# 2026-09-20：当天在「修复文字异常」的英文反查里验证过的游戏原生中文，固化进主词库
+# —— 英文环境下正向汉化也能把它们翻出来。译法以游戏官方中文为准。
+material quality=材质质量
+max fps=每秒最大帧数
+open door=开门
+you need to turn on the power first!=你需要先打开电源！
+get a randomized gobblegum=生成一个随机强化能力
+activate the teleport pad link=启动到传送垫的连接
+power eggnog=力量蛋奶酒
+double tap root beer=双塞麦根啤酒
+ammo full=弹药全满
+the first gobblegum of each round is free!=每回合的第一个泡泡糖免费！
+edit controls for game settings=为游戏设置操作控制
+fireworks=烟火
+abbreviated=简略
+drink=喝下
+repack=重新打包
 ~arcade lower=街机厅下层

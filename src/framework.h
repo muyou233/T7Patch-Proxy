@@ -185,6 +185,16 @@ bool t7patch_cfg_skip_pvp();
 void t7patch_cfg_set_skip_pvp(int skip);
 bool t7patch_cfg_skip_zm();
 void t7patch_cfg_set_skip_zm(int skip);
+
+// [LOCAL] The garbled-text switch.  Some workshop maps ship their own font, and
+// when that font has no CJK glyphs every Chinese string the map draws comes out
+// as a row of boxes.  Stepping aside is not enough - that only restores what WE
+// translated, while what the game and the map wrote is Chinese to begin with -
+// so that text is translated word by word back into English instead.  Only the
+// player can tell which map needs it: the glyph coverage sits inside a packed
+// font asset and cannot be inspected from the patch side.
+bool t7patch_cfg_english_fallback();
+void t7patch_cfg_set_english_fallback(int on);
 bool t7patch_cfg_dev_tools();
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start

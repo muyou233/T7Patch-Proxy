@@ -438,7 +438,9 @@ FIXES = [
     ("the gate accepts traditional as well as simplified", "translate.cpp",
      "const bool chinese = known && IsChineseGameLanguage(lang);"),
     ("the latch masks the effective switch", "Protection.cpp",
-     "!g_translate_language_block.load() && user_config.translate != 0"),
+     "return !g_translate_language_block.load();"),
+    ("the garbled-text switch bypasses the language gate", "Protection.cpp",
+     "if (user_config.english_fallback != 0)\n        return true;"),
     ("a menu switch-on releases the latch", "Protection.cpp",
      "g_translate_language_block.store(false);"),
     ("mod translation tooltip states the chinese-only rule", "overlay.cpp",
@@ -599,8 +601,35 @@ FIXES = [
      "Protection.cpp", "scene gate: session mode"),
     # The layer side.  Enabled() is the single funnel both hooks and the
     # collector already call, which is why Hooks.cpp needs no change at all.
+    # 2026-09-19: the garbled-text switch rides along - it does not silence the
+    # layer, it changes what the layer writes (Chinese translated back into
+    # English), and it can hold the gate open on its own for a player running
+    # with the dictionary switched off.
     ("the scene gate is folded into the layer's own switch", "translate.cpp",
-     "return g_enabled.load() && !g_sceneBlocked.load();"),
+     "const bool layerOn = g_enabled.load() || g_englishFallback.load()"),
+    ("the garbled-text switch reads the config", "translate.cpp",
+     "g_englishFallback.store(t7patch_cfg_english_fallback());"),
+    ("the garbled-text switch stands the dictionary down", "translate.cpp",
+     "if (g_englishFallback.load())"),
+    # 2026-09-20: the switch now spells Chinese out in pinyin (user's final
+    # call) - per-character replacement cannot reorder a sentence, needs no
+    # phrase table, and leaves nothing as boxes.
+    ("the garbled-text switch spells chinese out in pinyin",
+     "translate.cpp", "return RenderPinyin(original, originalLen, out, outSize);"),
+    # 2026-09-20: the fallback word table must be polled like the dictionary is.
+    # Without this a word-list edit looked like it did nothing at all until the
+    # settings were applied or the game restarted - which is precisely what it
+    # was doing (Init() was the only reader).
+    ("the fallback table is polled while the game runs",
+     "translate.cpp", "RefreshFallbackTablesIfChanged();"),
+    ("and reloaded only when the file actually changed",
+     "translate.cpp", "if (zhStamp == g_hanziStamp)"),
+    # 2026-09-19: the run length has to travel with the pointer.  The hooks hand
+    # over a pointer into the middle of a longer label, so a strlen() inside the
+    # renderer reads the NEXT run as well - which quietly broke the whole-string
+    # (single character) test.
+    ("the run length travels with the pointer into the renderer",
+     "translate.cpp", "hit = LookupKeyLocked(key, run.body, run.length, replacement,"),
     ("the scene gate also silences the collector", "translate.cpp",
      "if (g_sceneBlocked.load())"),
     # Menu side: indented child rows, and they write through the config layer.
@@ -1032,13 +1061,13 @@ if _bare != 1:
     fail += 1
 _tips = srcc["overlay.cpp"].count("ImGui::SetItemTooltip(") \
     + srcc["overlay.cpp"].count("ImGui::SetTooltip(")
-# 13 since 2026-09-17 (later): the twelve before, plus the DXVK toggle's "what is
-# this backend" tip.
-# (Deliberately an exact count - the point is that a tooltip cannot quietly
-# disappear or appear without this line being revisited.)
-out.append("   %-38s %s" % ("all 13 tooltips still present",
-                            "OK" if _tips == 13 else "FAIL (%d found)" % _tips))
-if _tips != 13:
+# 14 since 2026-09-19: the thirteen before, plus the garbled-text tip.  (The
+# pinyin switch and its extra tips were dropped - one switch covers the whole
+# case now.)  Deliberately an exact count: a tooltip cannot quietly disappear
+# or appear without this line being revisited.
+out.append("   %-38s %s" % ("all 14 tooltips still present",
+                            "OK" if _tips == 14 else "FAIL (%d found)" % _tips))
+if _tips != 14:
     fail += 1
 
 out.append("")
