@@ -1168,6 +1168,15 @@ hold ^3f^7 to clear debris [cost: 1500]=按住 ^3F^7 清理残骸 [价格: 1500]
 hold ^3f^7 to use elevator [cost: 250]=按住 ^3F^7 使用电梯 [价格: 250]
 hold ^3f^7 to open door [cost: 750]=按住 ^3F^7 开门 [价格: 750]
 hold ^3f^7 for dmr 14 [cost: 500]=按住 ^3F^7 购买 DMR 14 [价格: 500]
+# 2026-09-19：价格条目**当年的结论已更正**。当年（见上方注释）判断"带 `[Cost: N]` 的组合用不了模板 ⇒ 价格翻不了"，
+# 但实测：① 引擎里**现在并没有** `hold ^3f^7 for *` 这类泛用模板（注释里说的那个已不存在）⇒ 精确条目都能生效；
+#   ② 采集里含 `[Cost: N]` 的 run **一共只有 14 种**，其中 12 种词库早有精确条目（数字原样：`[价格: 250]` 等）
+#   ⇒ **只剩下面 2 条**。所以"价格不翻"并不是引擎做不到，只是当年没穷举完。
+# ⚠️ 数字一律**原样保留**（键里的价位就是原文，值里照抄，不做任何换算）。
+# ⚠️ 新价位（如工坊图自定 `[Cost: 800]`）仍需手写一条；不要试图写 `for * [cost: *]`（2 个 '*' 的模板会被
+#    同为 2 个 '*' 但书写更早的条目抢走，且值里的 '*' 也无法只翻数字）。
+hold ^3f^7 to contribute [cost: 5000]=按住 ^3F^7 捐献 [价格: 5000]
+hold ^3f^7 to purchase [cost: 50000]=按住 ^3F^7 购买 [价格: 50000]
 
 # ═══ 「按住 F 交互」整族（2026-09-18 采集补入，来自 workshop 地图的购买/拾取点）═══
 # 策略：**能靠模板的就不逐条加条目**（用户要求"遇到别的组合不用再频繁更新词库"）；
@@ -1209,7 +1218,12 @@ hold ^3f^7 for revive [cost: 500]=按住 ^3F^7 复活队友 [价格: 500]
 ~ammo replenish=弹药补给
 ~upgrade 1: faster reload replenish=升级 1：更快的换弹补给
 ~upgrade 2: faster reload replenish=升级 2：更快的换弹补给
+# 2026-09-19：Upgrade 3 的**效果名与 1/2 不同**（`Super Fast Auto Refill`，不是 Faster Reload Replenish）
+# ⇒ 上面两条覆盖不到它。用户截图实测 `按住 F 购买 弹药补给 [Upgrade 3: Super Fast Auto Refill]`（名字已翻、
+#   方括号里整块英文）⇒ 按同一风格补「升级 3」+ 通用尾句两条片段。
+~upgrade 3: super fast auto refill=升级 3：超快自动补给
 ~faster reload replenish=更快的换弹补给
+~super fast auto refill=超快自动补给
 # ── 作品名 / 通用 UI 标签（2026-09-18 加）：用户装了换 UI 的 mod，实测「地图选择界面」上
 # 这几个标签**全都没命中**（同一界面里 `亡者之夜` / `疯狂` / `死亡沼泽` 是命中的 ⇒ 通道没问题，纯缺词）。
 # 来源：作品名 = 官方/通行中文（《使命召唤：战争世界》见百度百科·搜狗百科）；UI 词 = 词库**既有译文**
@@ -1633,3 +1647,34 @@ you already have max ammo=你已经有最大弹药了
 ~extra points=额外点数
 ~random perk=随机技能
 ~cursed pedestal=诅咒底座
+
+# ═══ 探针采集补译：方括号块 + 工坊描述（2026-09-19）═══
+# 来源：`tools/dict_triage.py`（界面文本候选 97 条）+ `tools/bracket_gap.py`（方括号块 23 种）+ `tools/exact_gap.py`（修好路径后）。
+# 判读原则：只收**有明确含义、能译且不偏颇**的；玩家名 / 聊天记录 / 武器名 / 地图专名**一律不收**（默认保留原文）。
+# ⚠️ 口径统一到词库既有用词：僵尸（非"丧尸"）、手雷、战地升级（见上面的 refill 条目）、技能上限（见 perk limit 条目）、概率。
+# ⚠️ **价格标签 `[Cost: N]` 按用户决定不翻**（上方注释：2 星模板会被泛用的 `for *` 抢先吃掉；新价位一律手写精确条目）。
+#    `[Remaining: N]` 不是价格 ⇒ 用模板覆盖（键里只有一个 '*' ，不会被抢）。
+[remaining: *]=[剩余: *]
+# 方括号说明块：`bracket_gap.py` 报的 23 种里**真正缺条目**的（其余多为按键占位 `[{+actionslot 1}]`／已有片段／价格标签）
+~[back damage protection]=[背部伤害防护]
+~[night edition]=[夜战版]
+# 工坊地图 / UI 文本（作者自创，按"能译就译"规则处理；专名保留原文拼写）
+refills weapons, grenades, and field upgrade.=补满武器、手雷与战地升级。
+the longer you stay, the better the rewards.=待得越久，奖励越好。
+stay in the server room for a chance to earn rewards!=留在服务器机房，就有机会获得奖励！
+old alt version of blue archive classroom i made long ago but never uploaded till now.=我很早以前做的蔚蓝档案教室旧版，一直没上传，现在才放出来。
+persona 3 gekkoukan high promise=女神异闻录 3 月光馆高中·约定的日子
+persona 3 gekkoukan high promised day=女神异闻录 3 月光馆高中·约定的日子
+the day we promised to meet march 5th graduation day=我们说好要再见的那天 3 月 5 日·毕业日
+tower of doom: cybercity=末日之塔：赛博城
+[h1]tower of doom: cybercity[/h1]=[h1]末日之塔：赛博城[/h1]
+blue archive - classroom [night edition]=蔚蓝档案 - 教室 [夜战版]
+i am twilight sprinkl and my access level is: ^1unverified=我是 Twilight Sprinkl，我的访问等级是：^1未验证
+fifty floors. the staircase spirals up the [b]outside[/b] of the tower - open air, a long drop on one side, the horde on the other, nothing to hide behind.=五十层楼。楼梯沿着塔的[b]外侧[/b]盘旋而上——一侧是露天深渊，另一侧是尸潮，无处可藏。
+# 工坊图的区域标签（大写独立 run；片段足够独特，不会误伤）
+~my essence=我的精华
+~server room=服务器机房
+~village entrance=村庄入口
+~conference room=会议室
+~right hallway=右侧走廊
+~arcade lower=街机厅下层
