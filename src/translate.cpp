@@ -766,7 +766,13 @@ namespace translate
                     // phrase readings; longest match beats the single characters
                     // below.  (Cap 18 bytes = 6 characters.  'pl-- > 6', not
                     // 'pl >= 6; --pl': size_t would wrap past zero and loop forever.)
-                    if (len >= 6)
+                    //
+                    // The guard is on what is LEFT in the run, NOT on 'len': 'len'
+                    // is the byte length of the single character at 'at' (3 for a
+                    // Han character), so gating on len >= 6 skipped this whole
+                    // block and every phrase fell through to the per-character
+                    // readings ("重建" came out Zhong Jian).
+                    if (at + 6 <= total)
                     {
                         size_t maxLen = 18;
                         if (maxLen > total - at)

@@ -609,6 +609,13 @@ FIXES = [
      "const bool layerOn = g_enabled.load() || g_englishFallback.load()"),
     ("the garbled-text switch reads the config", "translate.cpp",
      "g_englishFallback.store(t7patch_cfg_english_fallback());"),
+    # 2026-09-20: the runtime log is opt-in.  The switch is PUSHED into t7log
+    # (a getter call from Append() would take the config mutex twice on one
+    # thread and deadlock), and the writer honours it - both ends anchored.
+    ("the config layer pushes the log switch", "Protection.cpp",
+     "t7log::SetEnabled(logEnabled);"),
+    ("and the log writer honours it", "t7patch_log.cpp",
+     "if (!g_enabled.load())"),
     ("the garbled-text switch stands the dictionary down", "translate.cpp",
      "if (g_englishFallback.load())"),
     # 2026-09-20: the switch now spells Chinese out in pinyin (user's final

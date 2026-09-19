@@ -195,6 +195,12 @@ void t7patch_cfg_set_skip_zm(int skip);
 // font asset and cannot be inspected from the patch side.
 bool t7patch_cfg_english_fallback();
 void t7patch_cfg_set_english_fallback(int on);
+
+// [LOCAL] 2026-09-20: the runtime log (T7Patch\t7patch.log).  Off by default:
+// a normal player never reads it and the debug trail grows.  The config layer
+// pushes this into t7log so the writer never calls back into the config.
+bool t7patch_cfg_log_enabled();
+void t7patch_cfg_set_log(int on);
 bool t7patch_cfg_dev_tools();
 void t7patch_cfg_set_menu_key(int vk);
 bool t7patch_menu_auto_open();   // 1 = overlay opens automatically at game start

@@ -22,8 +22,17 @@ namespace t7log
     // problem that keeps logging.
     constexpr long long kMaxBytes = 5 * 1024 * 1024;
 
+    // [LOCAL] 2026-09-20: the runtime log is OFF unless the player asks for it
+    // (the "log" key in t7patch.conf, default 0).  A normal player never reads
+    // t7patch.log, and the debug trail is large enough to matter on a long
+    // session.  The switch is PUSHED in from the config layer rather than read
+    // by Append(): the config layer logs too, so a getter call here would take
+    // its mutex a second time on the same thread and deadlock.
+    void SetEnabled(bool enabled);
+
     // Appends "[HH:MM:SS.mmm] [tag] message" to T7Patch\t7patch.log.
     // Best effort by design: it never throws, never blocks the game and does
-    // nothing at all if the file cannot be opened.
+    // nothing at all if the file cannot be opened - or if the log is switched
+    // off, which is the default.
     void Append(const char* tag, const char* message);
 }

@@ -785,7 +785,8 @@ struct patch_config
         K_SKIP_PVP = 1u << 9,
         K_SKIP_ZM = 1u << 10,
         K_ENGLISH_FALLBACK = 1u << 11,
-        K_ALL = (1u << 12) - 1,
+        K_LOG = 1u << 12,
+        K_ALL = (1u << 13) - 1,
     };
 
     char playername[16];
@@ -846,6 +847,11 @@ struct patch_config
     // ourselves, while what the game and the map wrote is Chinese to begin
     // with.  So that text gets translated word by word instead.
     int english_fallback;
+    // [LOCAL] 1 = write T7Patch\t7patch.log.  Off by default: a normal player
+    // never reads it, and on a long session the debug trail grows into the
+    // megabytes.  Same idea as dev_tools - a switch for the people who want
+    // the record, silent for everyone else.
+    int log;
     // [LOCAL] Which of the keys above the last loadfrom() found in the file, and
     // K_ALL once saveto() has written it.  Starts at 0 ("nothing read yet"), so
     // a freshly constructed object - a first run with no file at all - is never
@@ -878,6 +884,7 @@ struct patch_config
         int skip_pvp;
         int skip_zm;
         int english_fallback;
+        int log;
         unsigned keys_seen;
     };
 
@@ -900,6 +907,7 @@ struct patch_config
         skip_pvp = 1;       // ...and a Multiplayer match is the one scene it stays off in
         skip_zm = 0;        // Zombies is translated like everything else
         english_fallback = 0; // replace normally; the garbled-text switch is opt-in
+        log = 0;            // no runtime log unless the user asks for one
         keys_seen = 0;      // nothing read from a file yet
         exists = false;
         modified = std::filesystem::file_time_type();
@@ -927,6 +935,7 @@ struct patch_config
         v.skip_pvp = skip_pvp;
         v.skip_zm = skip_zm;
         v.english_fallback = english_fallback;
+        v.log = log;
         v.keys_seen = keys_seen;
     }
 
@@ -944,6 +953,7 @@ struct patch_config
         skip_pvp = v.skip_pvp;
         skip_zm = v.skip_zm;
         english_fallback = v.english_fallback;
+        log = v.log;
         keys_seen = v.keys_seen;
     }
 
@@ -1064,6 +1074,10 @@ struct patch_config
 
         outfile << "# 修复文字异常 1/0开启关闭（默认关。用于兼容地图无中文字型导致的（口口口）显示异常）" << std::endl;
         outfile << "english_fallback=" << v.english_fallback << std::endl;
+        outfile << std::endl;
+
+        outfile << "# 运行日志 1/0开启关闭（默认关。打开后补丁会把运行过程写进 T7Patch\\t7patch.log，排查问题时才需要，平时开着只会占磁盘）" << std::endl;
+        outfile << "log=" << v.log << std::endl;
         outfile << std::endl;
 
         outfile << "# 关闭多人对局翻译 1/0开启关闭（默认开：多人对局不翻译；建立对局后生效，主菜单不受影响）" << std::endl;
@@ -1330,6 +1344,17 @@ struct patch_config
                 }
             }
             break;
+            case FNV32("log"):
+            {
+                v.keys_seen |= K_LOG;
+                std::istringstream ivalread(val);
+                ivalread >> v.log;
+                if (ivalread.fail())
+                {
+                    v.log = 0; // default: no runtime log
+                }
+            }
+            break;
 
             case FNV32("skip_zm"):
             {
@@ -1525,6 +1550,22 @@ void t7patch_cfg_set_english_fallback(int on)
 {
     std::lock_guard<std::mutex> lock(g_config_mutex);
     user_config.english_fallback = on ? 1 : 0;
+}
+
+// [LOCAL] 2026-09-20: the runtime log.  Off by default - a normal player never
+// reads t7patch.log.  Pushed into t7log as a flag rather than read from there:
+// the log is written from inside the config layer too, so a getter call from
+// Append() would take g_config_mutex twice on one thread and deadlock.
+bool t7patch_cfg_log_enabled()
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    return user_config.log != 0;
+}
+
+void t7patch_cfg_set_log(int on)
+{
+    std::lock_guard<std::mutex> lock(g_config_mutex);
+    user_config.log = on ? 1 : 0;
 }
 
 // [LOCAL] Toggle the translation layer from the menu (page 2, next to the
@@ -1905,12 +1946,20 @@ void apply_settings()
     char playername[16];
     char networkpassword[1024];
     bool isfriendsonly;
+    bool logEnabled;
     {
         std::lock_guard<std::mutex> lock(g_config_mutex);
         memcpy(playername, user_config.playername, sizeof(playername));
         memcpy(networkpassword, user_config.networkpassword, sizeof(networkpassword));
         isfriendsonly = user_config.isfriendsonly != 0;
+        logEnabled = user_config.log != 0;
     }
+
+    // [LOCAL] 2026-09-20: push the log switch BEFORE the log lines below, so a
+    // player who just turned logging on from the menu gets this very apply
+    // recorded.  Pushed, not pulled - see t7patch_log.h for why Append() must
+    // never call back into the config layer.
+    t7log::SetEnabled(logEnabled);
 
     SetPlayerName(playername);
     SetFriendsOnly(isfriendsonly);

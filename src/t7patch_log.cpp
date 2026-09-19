@@ -1,6 +1,7 @@
 #include "t7patch_log.h"
 #include "framework.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 
@@ -8,6 +9,12 @@ namespace t7log
 {
     namespace
     {
+        // [LOCAL] 2026-09-20: off until the config layer says otherwise - the
+        // default for a normal player.  Atomic because Append() runs on several
+        // threads (render, MainThread, the updater worker) while SetEnabled()
+        // comes from wherever the config is applied.
+        std::atomic<bool> g_enabled{ false };
+
         // Fills `dirOut` with "<game folder>\T7Patch" and `fileOut` with the log
         // path inside it.  The path is built from the main module location, not
         // the working directory: the process working directory is NOT guaranteed
@@ -36,8 +43,16 @@ namespace t7log
         }
     }
 
+    void SetEnabled(bool enabled)
+    {
+        g_enabled.store(enabled);
+    }
+
     void Append(const char* tag, const char* message)
     {
+        if (!g_enabled.load())
+            return; // the default: a normal player carries no runtime log
+
         char dir[MAX_PATH * 2] = {};
         char path[MAX_PATH * 2] = {};
         if (!BuildPaths(dir, sizeof(dir), path, sizeof(path)))
