@@ -2,5 +2,12 @@
 /T7Patch
 /x64
 /.workbuddy
-/.codebuddy
 /CppProperties.json
+
+# [LOCAL] IDE 工作目录（skill / memory / 脚本产物），不进版本控制。
+/.codebuddy
+
+# [LOCAL] 可复用工具在 tools/（进私有库与公开库）；脚本产物不进库。
+/tools/*.txt
+/tools/*.log
+__pycache__/
