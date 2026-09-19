@@ -30,7 +30,8 @@ except Exception:
 GAME = r"F:\SteamLibrary\steamapps\common\Call of Duty Black Ops III"
 DUMP = os.path.join(GAME, r"T7Patch\ui_dump.txt")
 HERE = os.path.dirname(os.path.abspath(__file__))
-DICT = os.path.join(HERE, "..", "..", "translate", "translate_zh.txt")
+# HERE 就是仓库的 tools/ ⇒ 词库在它上一级的 translate/（原写 "..",".." 会跑到仓库外，2026-09-19 修）
+DICT = os.path.join(HERE, "..", "translate", "translate_zh.txt")
 OUT = os.path.join(HERE, "exact_gap.txt")
 
 MIN_CAPTURE = 2   # 捕获片段太短（单字符）不值得报，噪声大
