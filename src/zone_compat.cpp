@@ -270,14 +270,24 @@ namespace zone_compat
             return false;
         }
 
-        // "<item>\en_zm_map.ff" / ".xpak" -> "<item>\<lang>_zm_map.ff".  The
-        // body after the language prefix is shared by every language, so the
-        // destination name is just the prefix swapped.
-        unsigned AddLanguageZones(const char* itemDir, const char* lang,
-            unsigned* added)
+        // Every language code this title's packs can carry - both as a target
+        // and as a source.  This is also the order in which a source is looked
+        // for: 'en' first on purpose (see AddLanguageZones), and "sc"/"tc" are
+        // listed because a Chinese-only pack has to be able to seed the others
+        // just like an English-only one seeds Chinese.
+        constexpr const char* kSourceOrder[] =
+        {
+            "en", "fr", "it", "ge", "es", "ru", "pl",
+            "jp", "ko", "sc", "tc", "bp", "ea",
+        };
+
+        // Copies every "<src>_<body>" in itemDir to "<lang>_<body>", skipping
+        // the ones that already exist.  Returns how many source names it saw.
+        unsigned CopyZonesFrom(const char* itemDir, const char* src,
+            const char* lang, unsigned* added)
         {
             char pattern[MAX_PATH * 2] = {};
-            int n = snprintf(pattern, sizeof(pattern), "%s\\en_*", itemDir);
+            int n = snprintf(pattern, sizeof(pattern), "%s\\%s_*", itemDir, src);
             if (n <= 0 || static_cast<size_t>(n) >= sizeof(pattern))
                 return 0;
 
@@ -291,7 +301,7 @@ namespace zone_compat
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                     continue;
                 const char* name = fd.cFileName;
-                if (_strnicmp(name, "en_", 3) != 0)
+                if (_strnicmp(name, src, 2) != 0 || name[2] != '_')
                     continue;
                 if (++seen > kMaxItems)
                     break;
@@ -308,21 +318,44 @@ namespace zone_compat
             return seen;
         }
 
+        // The body after the language prefix is shared by every language, so a
+        // missing version is just the prefix swapped onto a copy of one that is
+        // present.
+        //
+        // The source is NOT assumed to be English.  This title's own tooling
+        // exports the full language set, so in practice a map is either
+        // complete or English-only - but an author can hand-pack any subset,
+        // and a map that shipped ONLY (say) Chinese is exactly as unloadable
+        // for an English client as the reverse is for us.  So: try every
+        // language that is present, English first.
+        unsigned AddLanguageZones(const char* itemDir, const char* lang,
+            unsigned* added)
+        {
+            unsigned seen = 0;
+            for (const char* src : kSourceOrder)
+            {
+                if (strcmp(src, lang) == 0)
+                    continue; // the running language was asked for already
+                seen += CopyZonesFrom(itemDir, src, lang, added);
+            }
+            return seen;
+        }
+
         // Sound libraries keep the language code in the MIDDLE of the name:
         // "snd\en\zm_map.en.sabl" -> "snd\<lang>\zm_map.<lang>.sabl".
-        void AddLanguageSounds(const char* itemDir, const char* lang,
-            unsigned* added)
+        void CopySoundsFrom(const char* itemDir, const char* src,
+            const char* lang, unsigned* added)
         {
             char srcDir[MAX_PATH * 2] = {};
             char destDir[MAX_PATH * 2] = {};
-            int n = snprintf(srcDir, sizeof(srcDir), "%s\\snd\\en", itemDir);
+            int n = snprintf(srcDir, sizeof(srcDir), "%s\\snd\\%s", itemDir, src);
             if (n <= 0 || static_cast<size_t>(n) >= sizeof(srcDir))
                 return;
             n = snprintf(destDir, sizeof(destDir), "%s\\snd\\%s", itemDir, lang);
             if (n <= 0 || static_cast<size_t>(n) >= sizeof(destDir))
                 return;
             if (GetFileAttributesA(srcDir) == INVALID_FILE_ATTRIBUTES)
-                return; // this item carries no sounds
+                return; // this item has no sounds in that language
             if (!CreateDirectoryA(destDir, nullptr)
                 && GetLastError() != ERROR_ALREADY_EXISTS)
             {
@@ -334,6 +367,9 @@ namespace zone_compat
             if (n <= 0 || static_cast<size_t>(n) >= sizeof(pattern))
                 return;
 
+            char infix[8] = {};
+            snprintf(infix, sizeof(infix), ".%s.", src);
+
             WIN32_FIND_DATAA fd = {};
             HANDLE h = FindFirstFileA(pattern, &fd);
             if (h == INVALID_HANDLE_VALUE)
@@ -343,7 +379,7 @@ namespace zone_compat
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                     continue;
                 const char* name = fd.cFileName;
-                const char* at = strstr(name, ".en.");
+                const char* at = strstr(name, infix);
                 if (!at)
                     continue;
                 if (strlen(name) >= MAX_PATH)
@@ -352,13 +388,26 @@ namespace zone_compat
                 char dest[MAX_PATH] = {};
                 const size_t head = static_cast<size_t>(at - name);
                 const int m = snprintf(dest, sizeof(dest), "%.*s.%s.%s",
-                    static_cast<int>(head), name, lang, at + 4);
+                    static_cast<int>(head), name, lang, at + strlen(infix));
                 if (m <= 0 || static_cast<size_t>(m) >= sizeof(dest))
                     continue;
 
                 CopyIfMissing(srcDir, name, dest, added);
             } while (FindNextFileA(h, &fd));
             FindClose(h);
+        }
+
+        // Same policy as AddLanguageZones: every language that is present can
+        // seed the one the game asked for, English first.
+        void AddLanguageSounds(const char* itemDir, const char* lang,
+            unsigned* added)
+        {
+            for (const char* src : kSourceOrder)
+            {
+                if (strcmp(src, lang) == 0)
+                    continue;
+                CopySoundsFrom(itemDir, src, lang, added);
+            }
         }
 
         // ------------------------------------------------------------------
