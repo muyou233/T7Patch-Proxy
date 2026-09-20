@@ -1,5 +1,5 @@
 # T7Patch UI 翻译词库
-# version: 2026-09-18a
+# version: 2026-09-20a
 # 匹配规则（实现见 src\translate.cpp）：
 #   - 引擎会把一条 UI 文本拆成若干「片段」分别送出（片段之间是控制字节），本文件按片段匹配
 #   - 键里的 '*' 匹配任意文本（模板条目，见文件末尾）；值里的 '*' 按顺序填回捕获到的原文
@@ -1695,3 +1695,57 @@ abbreviated=简略
 drink=喝下
 repack=重新打包
 ~arcade lower=街机厅下层
+
+# ═══ MOD：末日之塔（Tower of Doom）卡牌说明 + 结算/暂停菜单遗漏项 ═══
+# 来源：`tools/dict_diff.py` 的缺失清单（采集 96 条唯一串 / 缺 55 条），逐条判断后**只收**
+#   "有效词组、能直译、无非议"的。
+# ⚠️ 刻意不收（用户 2026-09-20 规则：**属于人名的不翻译**）：
+#   人名 / 账号名 `muyou`、`Rigby`、`nathansaraosos20`、`yarsky player 0.`，
+#   玩家昵称 `freezie`、`Tidy`（-ie 昵称化 / 单词昵称，非界面词组）。
+# ⚠️ 其它一律不收：按键名（ENTER/ESC/TAB/S/M/B/N/U/E/F）、武器名（M1911/M14/KN-44）、
+#   字体名（DummyFont）、按键绑定令牌（`[{+activate}]` / `[{+GOSTAND}]` / `[{+SMOKE}]` /
+#   `[{+FRAG}]` / `[[{+actionslot N}]]`）—— 翻译令牌会弄坏按键提示。
+# ⚠️ 复核过、**词库已有**（别再重复加）：`something`、`^3[{+reload}]^7 reload`、`tower of doom: cybercity`、
+#   `you survived`、`low ammo`、`the giant`、`kino der toten`（后两条是片段，官方图名照旧）。
+# ⚠️ `[b]And the rounds never stop.[/b] The instant a round's las` 是**被截断的采集行**（128 字节上限）
+#   ⇒ 拿不到完整原文，**不建条目**（否则永远匹配不上）。
+# 口径与既有条目对齐：技能（perk）/ 点数 / 僵尸 / 阶（见 `on tier 3 of 3`）。
+# 两条用模板而不是逐条枚举（用户定的"能拼就不要整句写"）：`carry up to N perks`、`class gun is tier N of 3`。
+switch=切换
+lock=锁定
+mod=模组
+zombie blood=僵尸血
+total points=总点数
+restart map=重新开始地图
+game time:=游戏时间：
+round based zombies=回合制僵尸
+roundbased zombies=回合制僵尸
+press f to play video 3=按 F 播放视频 3
+carry up to * perks=最多携带 * 个技能
+your class gun is tier * of 3=你的配装枪为第 * 阶（共 3 阶）
+4 without this upgrade=未升级时为 4 个
++10% luck bar gain=幸运槽获取 +10%
+6.5 hp/s, 33% resist, 5s=6.5 生命/秒、33% 抗性、5 秒
+blink * units forward=向前闪现 * 单位
+a fuller bar deals rarer cards=槽越满，抽到的卡越稀有
+200 hp shield, back in 4:00=200 点生命护盾，4:00 后恢复
+hold or wear it; recharges when broken=手持或佩戴；碎裂后重新充能
+tier 2: pap + floor 10; new gun unpacked=第 2 阶：PaP + 第 10 层；新枪未强化
+mage: healing aura, blink and archmage unlock with their upgrade cards=法师：治疗光环、闪现与大法师随各自的升级卡解锁
+# ── 同一轮的补充（用户 2026-09-20 第二批截图：暂停菜单 + YOUR UPGRADES 面板）──
+# 这一批**都验证过确实走 UI 管线**（同界面上我上批补的 `your class gun is tier * of 3` /
+# `tier 2: …` / `game time:` 已经变成中文了）⇒ 值得补。
+# ⚠️ **同界面上翻不了的**（没被采集到 = 不走管线，多半是预渲染标题）：
+#   `YOUR UPGRADES` / `CLASS TIER` / `ATHLETE` / `GUNSLINGER` / `slide 3.0s. wall run improves per Lv`
+#   ⇒ **不要为它们建条目**（skill："加词条 = 死键，别再试"）。
+# ⚠️ `重新开始关卡`（`restart level`）与 `~game settings=游戏设置` 早已有，别再重复加。
+pause menu=暂停菜单
+return to game=回到游戏
+leave game=离开游戏
+switch to third person=切换到第三人称
+safe area=安全区
++20% slide speed, +50% jump height=+20% 滑铲速度、+50% 跳跃高度
+class secondary only=仅限副武器
++30% sidearm damage vs bosses=对 Boss 的副武器伤害 +30%
+bolt arcs to 2 more zombies=闪电链弹射至额外 2 个僵尸
+55% hit damage per arc; never the panzer=每道电弧 55% 命中伤害；对装甲兵无效
