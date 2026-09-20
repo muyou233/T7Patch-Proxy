@@ -23,7 +23,6 @@ namespace translate
     // namespace below calls them, while their definitions sit further down
     // (next to the loaders themselves, outside the anonymous namespace).
     void LoadHanziTable();
-    void RefreshFallbackTablesIfChanged();
 
     namespace
     {
@@ -705,7 +704,6 @@ namespace translate
         // way English translation does, needs no phrase table, and covers every
         // character GB2312 lists, so nothing is ever left as boxes.
         std::unordered_map<std::string, std::string> g_hanzi;
-        unsigned long long g_hanziStamp = 0; // guarded by g_mutex
 
         // sourceLen is the length of THIS RUN, which is not strlen(source): the
         // hooks hand over a pointer into the middle of a longer label, so the
@@ -1320,15 +1318,6 @@ namespace translate
                 return;
             g_lastPollMs.store(now);
 
-            // [LOCAL] 2026-09-20: the English fallback switch reads its own two
-            // tables, and until now nothing watched them - they were read once in
-            // Init() and then stayed as they were.  Editing a word table looked
-            // like it did nothing at all until the game was restarted or the
-            // settings were applied, which is exactly what it was doing.  They
-            // are polled here with the same interval, and the same "only on
-            // change" rule.
-            RefreshFallbackTablesIfChanged();
-
             char path[MAX_PATH * 2] = {};
             if (!BuildDictionaryPath(path, sizeof(path)))
                 return;
@@ -1373,104 +1362,38 @@ namespace translate
 
     }
 
-    // [LOCAL] 2026-09-20: keeps the pinyin table in step with the file while
-    // the game runs.  It is the table a collected string is added to, so "I
-    // edited the word list and nothing happened" was the normal result before
-    // this - the table was only ever read from Init(), which needs the
-    // settings to be applied or the game to be restarted.
     // [LOCAL] 2026-09-20: the per-character pinyin table the map-safe switch
     // renders with.  One syllable per entry ("An"); the engine spaces the
     // syllables itself.  GB2312 scope (no rare ideographs) - see the generator.
+    //
+    // Read from the dll ONLY.  It used to be external-first with the baked copy
+    // as a fallback, which meant a stale translate_pinyin.txt left in the folder
+    // silently won over the one in the binary - and "is an old file going to
+    // interfere?" is a question that should not need asking.  The table is fixed
+    // data (GB2312 plus a phrase list): it does not want updating, so one source
+    // is one less thing to keep in step.
     void LoadHanziTable()
     {
-        char dir[MAX_PATH * 2] = {};
-        char path[MAX_PATH * 2] = {};
-        bool havePath = BuildDataDir(dir, sizeof(dir));
-        if (havePath)
-        {
-            const int n = snprintf(path, sizeof(path), "%s\\translate_pinyin.txt", dir);
-            havePath = n > 0 && static_cast<size_t>(n) < sizeof(path);
-        }
-
         std::unordered_map<std::string, std::string> table;
-        unsigned long long stamp = 0;
-        bool fromFile = false;
 
-        if (havePath)
+        std::string blob;
+        if (!LoadBuiltinResource(IDR_TRANSLATE_PINYIN, blob))
         {
-            std::ifstream in(path, std::ios::binary);
-            if (in)
-            {
-                std::string blob;
-                in.seekg(0, std::ios::end);
-                const std::streamoff size = in.tellg();
-                if (size > 0)
-                {
-                    blob.resize(static_cast<size_t>(size));
-                    in.seekg(0, std::ios::beg);
-                    in.read(&blob[0], size);
-                }
-                ParsePinyinBuffer(blob.data(), blob.size(), table);
-                if (!table.empty())
-                {
-                    fromFile = true;
-                    stamp = FileStamp(path);
-                }
-            }
+            Logf("init: no built-in pinyin table - Chinese cannot be spelled out");
+            return;
         }
 
-        if (!fromFile)
+        ParsePinyinBuffer(blob.data(), blob.size(), table);
+        if (table.empty())
         {
-            std::string blob;
-            if (!LoadBuiltinResource(IDR_TRANSLATE_PINYIN, blob))
-            {
-                Logf("init: no pinyin table (no usable file and none built in)");
-                return;
-            }
-            ParsePinyinBuffer(blob.data(), blob.size(), table);
-            if (table.empty())
-            {
-                Logf("init: the built-in pinyin table is unusable");
-                return;
-            }
-            if (havePath)
-                Logf("init: pinyin file (%s) is missing or empty - using the built-in copy", path);
+            Logf("init: the built-in pinyin table is unusable");
+            return;
         }
 
         std::lock_guard<std::mutex> lock(g_mutex);
         g_hanzi.swap(table);
-        // A stamp of 0 means "the built-in copy is in force".  The poll compares
-        // this against the file's stamp, so the file appearing later (0 -> real)
-        // reloads from it and the file disappearing (real -> 0) falls back here.
-        g_hanziStamp = fromFile ? stamp : 0;
         g_renderCache.clear(); // the memoized answers were built from the old table
-        Logf("init: pinyin table %u character(s) loaded%s",
-            static_cast<unsigned>(g_hanzi.size()), fromFile ? "" : " (built-in)");
-    }
-
-    void RefreshFallbackTablesIfChanged()
-    {
-        char dir[MAX_PATH * 2] = {};
-        if (!BuildDataDir(dir, sizeof(dir)))
-            return;
-
-        // The same path LoadHanziTable builds.
-        char zhPath[MAX_PATH * 2] = {};
-        const int b = snprintf(zhPath, sizeof(zhPath), "%s\\translate_pinyin.txt", dir);
-        if (b <= 0 || static_cast<size_t>(b) >= sizeof(zhPath))
-            return;
-
-        const unsigned long long zhStamp = FileStamp(zhPath);
-
-        {
-            std::lock_guard<std::mutex> lock(g_mutex);
-            if (zhStamp == g_hanziStamp)
-                return; // unchanged - nothing to re-read
-        }
-
-        // Re-read whole: the loader latches its own stamp, quietly this time.
-        LoadHanziTable();
-        Logf("english fallback: pinyin table reloaded (%u characters)",
+        Logf("init: pinyin table %u character(s) loaded (built-in)",
             static_cast<unsigned>(g_hanzi.size()));
     }
 

@@ -636,14 +636,14 @@ FIXES = [
     # phrase table, and leaves nothing as boxes.
     ("the garbled-text switch spells chinese out in pinyin",
      "translate.cpp", "return RenderPinyin(original, originalLen, out, outSize);"),
-    # 2026-09-20: the fallback word table must be polled like the dictionary is.
-    # Without this a word-list edit looked like it did nothing at all until the
-    # settings were applied or the game restarted - which is precisely what it
-    # was doing (Init() was the only reader).
-    ("the fallback table is polled while the game runs",
-     "translate.cpp", "RefreshFallbackTablesIfChanged();"),
-    ("and reloaded only when the file actually changed",
-     "translate.cpp", "if (zhStamp == g_hanziStamp)"),
+    # 2026-09-20: the pinyin table is read from the dll ONLY.  External-first
+    # looked harmless but let a stale file left in the game folder quietly
+    # override the baked copy; the table is fixed data, so a rebuild is the only
+    # way it can change anyway and there is nothing to poll for.
+    ("the pinyin table is loaded from the built-in copy",
+     "translate.cpp", "if (!LoadBuiltinResource(IDR_TRANSLATE_PINYIN, blob))"),
+    ("and the log calls it the built-in one", "translate.cpp",
+     "init: pinyin table %u character(s) loaded (built-in)"),
     # 2026-09-19: the run length has to travel with the pointer.  The hooks hand
     # over a pointer into the middle of a longer label, so a strlen() inside the
     # renderer reads the NEXT run as well - which quietly broke the whole-string
