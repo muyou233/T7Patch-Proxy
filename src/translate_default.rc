@@ -36,7 +36,13 @@
 // the directory of the resource script), i.e.
 // <repo>\translate\translate_zh.builtin.txt.
 
+// [LOCAL] 2026-09-20: the pinyin table rides along under the same rules - the
+// pinned snapshot (translate_pinyin.builtin.txt) is what ships inside the dll,
+// the external translate_pinyin.txt still wins whenever it is usable, and
+// refreshing the snapshot is a deliberate release step (byte copy + rebuild).
+// See IDR_TRANSLATE_PINYIN in translate_res.h.
 #include <windows.h>
 #include "translate_res.h"
 
 IDR_TRANSLATE_DICT RCDATA "..\\translate\\translate_zh.builtin.txt"
+IDR_TRANSLATE_PINYIN RCDATA "..\\translate\\translate_pinyin.builtin.txt"

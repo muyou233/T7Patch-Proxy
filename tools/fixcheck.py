@@ -123,7 +123,13 @@ src = {f: io.open(os.path.join(ROOT, f), 'r', encoding='utf-8', newline='').read
                  "proxy/d3d11.def", "t7patch_log.cpp", "framework.h",
                  # 2026-09-16: the start-up failure warning lives in dllmain.cpp
                  # and is raised from the proxy, so both files need anchors.
-                 "dllmain.cpp", "proxy/Proxy.cpp")}
+                 "dllmain.cpp", "proxy/Proxy.cpp",
+                 # 2026-09-20: the built-in blobs (dictionary + pinyin table) are
+                 # declared in the resource script and its shared header.  Both
+                 # are anchored, so both have to be readable here - a missing key
+                 # used to raise KeyError and kill the script AFTER the report
+                 # file was written, which read as PASS from the outside.
+                 "translate_default.rc", "translate_res.h")}
 # Code-only view (comments and literals blanked) for the negative tests below:
 # the new comments deliberately QUOTE the old buggy lines, so a raw substring
 # search would report them as still present.
@@ -326,8 +332,15 @@ FIXES = [
      "bool DictionaryPath(char* out, size_t outSize)"),
     ("entry count is exposed for the updater", "translate.cpp",
      "unsigned EntryCount()"),
+    # 2026-09-20: the loader was generalised (LoadBuiltinResource(id, out)) so
+    # the pinyin table could ship inside the dll too; the ids still come from
+    # the shared header, which is what these anchors are about.
     ("built-in dictionary id comes from the shared header", "translate.cpp",
-     "MAKEINTRESOURCE(IDR_TRANSLATE_DICT)"),
+     "LoadBuiltinResource(IDR_TRANSLATE_DICT, out)"),
+    ("and so does the built-in pinyin table", "translate.cpp",
+     "LoadBuiltinResource(IDR_TRANSLATE_PINYIN, blob)"),
+    ("the pinyin table ships as a pinned snapshot", "translate_default.rc",
+     "IDR_TRANSLATE_PINYIN RCDATA"),
     ("update runs on a worker thread", "dict_update.cpp",
      "std::thread(Worker).detach();"),
     ("update is button-triggered, never automatic", "overlay.cpp",

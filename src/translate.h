@@ -87,11 +87,4 @@ namespace translate
     // refuse a download that would shrink the dictionary by a lot; nothing else
     // reads it.
     unsigned EntryCount();
-
-    // [LOCAL] 2026-09-20: the pinyin table the map-safe switch renders with,
-    // and how many characters it holds right now.  Same updater deal as the
-    // pair above: the update button writes this file too and refuses a
-    // download that would shrink it by a lot.
-    bool HanziPath(char* out, size_t outSize);
-    unsigned HanziCount();
 }

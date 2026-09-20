@@ -1158,10 +1158,10 @@ namespace translate
             }
         }
 
-        // Pulls the dictionary that ships inside the dll.  Read through the
+        // Pulls an RCDATA blob that ships inside the dll.  Read through the
         // resource API so it costs nothing until it is actually needed - Windows
         // pages it in from the image on demand.
-        bool LoadBuiltinDictionary(std::string& out)
+        bool LoadBuiltinResource(unsigned id, std::string& out)
         {
             // The RCDATA lives in THIS module, so this module is what has to be
             // asked for it.  A NULL hModule does not mean "the caller" - it means
@@ -1173,14 +1173,13 @@ namespace translate
             HMODULE self = nullptr;
             if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
                     GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                    reinterpret_cast<LPCWSTR>(&LoadBuiltinDictionary), &self) || !self)
+                    reinterpret_cast<LPCWSTR>(&LoadBuiltinResource), &self) || !self)
                 return false;
 
             // TCHAR flavour on purpose: RT_RCDATA and MAKEINTRESOURCE expand to
             // their WIDE forms in this project, and pairing them with an explicit
             // ...A call is a type error (C2664).
-            const HRSRC res = FindResource(self,
-                MAKEINTRESOURCE(IDR_TRANSLATE_DICT), RT_RCDATA);
+            const HRSRC res = FindResource(self, MAKEINTRESOURCE(id), RT_RCDATA);
             if (!res)
                 return false;
             const DWORD size = SizeofResource(self, res);
@@ -1193,6 +1192,44 @@ namespace translate
 
             out.assign(static_cast<const char*>(data), static_cast<size_t>(size));
             return true;
+        }
+
+        // The dictionary that ships inside the dll (see translate_default.rc).
+        bool LoadBuiltinDictionary(std::string& out)
+        {
+            return LoadBuiltinResource(IDR_TRANSLATE_DICT, out);
+        }
+
+        // One "key=value" per line, '#' starts a comment - the same shape the
+        // dictionary uses.  Works on a whole buffer so the external file and the
+        // copy baked into the dll share one parser.
+        void ParsePinyinBuffer(const char* data, size_t size,
+            std::unordered_map<std::string, std::string>& out)
+        {
+            size_t at = 0;
+            while (at < size)
+            {
+                const char* start = data + at;
+                const char* nl = static_cast<const char*>(
+                    memchr(start, '\n', size - at));
+                const size_t len = nl ? static_cast<size_t>(nl - start)
+                                      : (size - at);
+                at += len + (nl ? 1u : 0u);
+
+                size_t end = len;
+                if (end > 0 && start[end - 1] == '\r')
+                    --end; // CRLF file
+                if (end == 0 || start[0] == '#')
+                    continue;
+                const void* eq = memchr(start, '=', end);
+                if (!eq)
+                    continue;
+                const size_t eqAt = static_cast<const char*>(eq) - start;
+                if (eqAt == 0 || eqAt + 1 >= end)
+                    continue;
+                out[std::string(start, eqAt)] =
+                    std::string(start + eqAt + 1, end - eqAt - 1);
+            }
         }
 
         // Is this parse result worth publishing?  Entries are the normal case,
@@ -1347,41 +1384,68 @@ namespace translate
     void LoadHanziTable()
     {
         char dir[MAX_PATH * 2] = {};
-        if (!BuildDataDir(dir, sizeof(dir)))
-            return;
-
         char path[MAX_PATH * 2] = {};
-        const int n = snprintf(path, sizeof(path), "%s\\translate_pinyin.txt", dir);
-        if (n <= 0 || static_cast<size_t>(n) >= sizeof(path))
-            return;
-
-        std::ifstream in(path, std::ios::binary);
-        if (!in)
+        bool havePath = BuildDataDir(dir, sizeof(dir));
+        if (havePath)
         {
-            Logf("init: no pinyin table (%s) - Chinese cannot be spelled out", path);
-            return;
+            const int n = snprintf(path, sizeof(path), "%s\\translate_pinyin.txt", dir);
+            havePath = n > 0 && static_cast<size_t>(n) < sizeof(path);
         }
 
         std::unordered_map<std::string, std::string> table;
-        std::string line;
-        while (std::getline(in, line))
+        unsigned long long stamp = 0;
+        bool fromFile = false;
+
+        if (havePath)
         {
-            if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-            if (line.empty() || line[0] == '#')
-                continue;
-            const size_t eq = line.find('=');
-            if (eq == std::string::npos || eq == 0 || eq + 1 >= line.size())
-                continue;
-            table[line.substr(0, eq)] = line.substr(eq + 1);
+            std::ifstream in(path, std::ios::binary);
+            if (in)
+            {
+                std::string blob;
+                in.seekg(0, std::ios::end);
+                const std::streamoff size = in.tellg();
+                if (size > 0)
+                {
+                    blob.resize(static_cast<size_t>(size));
+                    in.seekg(0, std::ios::beg);
+                    in.read(&blob[0], size);
+                }
+                ParsePinyinBuffer(blob.data(), blob.size(), table);
+                if (!table.empty())
+                {
+                    fromFile = true;
+                    stamp = FileStamp(path);
+                }
+            }
+        }
+
+        if (!fromFile)
+        {
+            std::string blob;
+            if (!LoadBuiltinResource(IDR_TRANSLATE_PINYIN, blob))
+            {
+                Logf("init: no pinyin table (no usable file and none built in)");
+                return;
+            }
+            ParsePinyinBuffer(blob.data(), blob.size(), table);
+            if (table.empty())
+            {
+                Logf("init: the built-in pinyin table is unusable");
+                return;
+            }
+            if (havePath)
+                Logf("init: pinyin file (%s) is missing or empty - using the built-in copy", path);
         }
 
         std::lock_guard<std::mutex> lock(g_mutex);
         g_hanzi.swap(table);
-        g_hanziStamp = FileStamp(path);
+        // A stamp of 0 means "the built-in copy is in force".  The poll compares
+        // this against the file's stamp, so the file appearing later (0 -> real)
+        // reloads from it and the file disappearing (real -> 0) falls back here.
+        g_hanziStamp = fromFile ? stamp : 0;
         g_renderCache.clear(); // the memoized answers were built from the old table
-        Logf("init: pinyin table %u character(s) loaded",
-            static_cast<unsigned>(g_hanzi.size()));
+        Logf("init: pinyin table %u character(s) loaded%s",
+            static_cast<unsigned>(g_hanzi.size()), fromFile ? "" : " (built-in)");
     }
 
     void RefreshFallbackTablesIfChanged()
@@ -1561,22 +1625,6 @@ namespace translate
             if (!out || outSize == 0)
                 return false;
             return BuildDictionaryPath(out, outSize);
-        }
-
-    // [LOCAL] 2026-09-20: the pinyin table the map-safe switch renders with.
-    bool HanziPath(char* out, size_t outSize)
-        {
-            char dir[MAX_PATH * 2] = {};
-            if (!out || outSize == 0 || !BuildDataDir(dir, sizeof(dir)))
-                return false;
-            const int n = snprintf(out, outSize, "%s\\translate_pinyin.txt", dir);
-            return n > 0 && static_cast<size_t>(n) < outSize;
-        }
-
-    unsigned HanziCount()
-        {
-            std::lock_guard<std::mutex> lock(g_mutex);
-            return static_cast<unsigned>(g_hanzi.size());
         }
 
     unsigned EntryCount()

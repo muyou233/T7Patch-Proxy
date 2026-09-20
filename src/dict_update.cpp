@@ -42,10 +42,12 @@ namespace dict_update
             const wchar_t* url;
             bool jsonApi;
         };
-        // 2026-09-20: two published files now - the main dictionary and the
-        // pinyin table the map-safe switch renders with.  Same three mirrors
-        // each, same order (jsDelivr for mainland reachability, GitHub raw for
-        // freshness, Gitee's JSON contents API last).
+        // One published file: the dictionary.  The pinyin table is NOT
+        // downloaded - it ships inside the dll (IDR_TRANSLATE_PINYIN, see
+        // translate_default.rc) because it is fixed data that does not want
+        // updating: GB2312 plus a phrase list.  Three mirrors of the same
+        // published file, tried in order (jsDelivr for mainland reachability,
+        // GitHub raw for freshness, Gitee's JSON contents API last).
         constexpr Source kDictSources[] =
         {
             {
@@ -61,25 +63,6 @@ namespace dict_update
             {
                 L"https://gitee.com/api/v5/repos/muyou23333/"
                 L"t7-patch-proxy-translate/contents/translate/translate_zh.txt"
-                L"?ref=master",
-                true
-            },
-        };
-        constexpr Source kPinyinSources[] =
-        {
-            {
-                L"https://cdn.jsdelivr.net/gh/muyou233/T7Patch-Proxy@main"
-                L"/translate/translate_pinyin.txt",
-                false
-            },
-            {
-                L"https://raw.githubusercontent.com/muyou233/T7Patch-Proxy"
-                L"/main/translate/translate_pinyin.txt",
-                false
-            },
-            {
-                L"https://gitee.com/api/v5/repos/muyou23333/"
-                L"t7-patch-proxy-translate/contents/translate/translate_pinyin.txt"
                 L"?ref=master",
                 true
             },
@@ -478,30 +461,11 @@ namespace dict_update
                 return;
             }
 
-            // ---- 2. The pinyin table (best effort).  2026-09-20: the
-            // map-safe switch renders pinyin from it, so an update that
-            // refreshes the dictionary should refresh it too - but its absence
-            // on a source (an older mirror not carrying the file yet) must not
-            // fail the run: the dictionary itself already landed.
-            char pinPath[MAX_PATH * 2] = {};
-            std::string pinErr = "cannot resolve the pinyin path";
-            unsigned pinGot = 0;
-            bool pinOk = false;
-            std::string pinBody;
-            if (translate::HanziPath(pinPath, sizeof(pinPath)))
-            {
-                pinOk = UpdateFile(kPinyinSources, std::size(kPinyinSources),
-                    translate::HanziCount(), pinBody, pinErr, pinGot)
-                    && InstallDictionary(pinBody, pinPath);
-                if (!pinOk)
-                    pinErr = pinErr.empty() ? "cannot replace the file" : pinErr;
-            }
-
+            // The pinyin table is deliberately NOT part of this run: it ships
+            // inside the dll and does not want updating.  (It was briefly a
+            // second download target; the baked-in copy replaced that.)
             g_entries.store(got);
-            if (pinOk)
-                SetMessage("%u entries + %u pinyin", got, pinGot);
-            else
-                SetMessage("%u entries (pinyin not updated: %s)", got, pinErr.c_str());
+            SetMessage("%u entries", got);
             g_state.store(static_cast<int>(State::Ok));
 
             // Only a run that got this far starts the cooldown (see the
@@ -516,17 +480,8 @@ namespace dict_update
             // in force from here on - no restart, no waiting for a timestamp.
             translate::RequestReload();
 
-            if (pinOk)
-            {
-                Logf("dictionary updated from the network: %u entries + %u pinyin "
-                    "(was %u entries); reload requested - it lands on the next UI rebuild",
-                    got, pinGot, have);
-            }
-            else
-            {
-                Logf("dictionary updated from the network: %u entries (was %u); "
-                    "pinyin table NOT updated: %s", got, have, pinErr.c_str());
-            }
+            Logf("dictionary updated from the network: %u entries (was %u); "
+                "reload requested - it lands on the next UI rebuild", got, have);
         }
     }
 
