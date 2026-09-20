@@ -629,19 +629,6 @@ namespace translate
             return false;
         }
 
-        // [LOCAL] 2026-09-19: turn Chinese back into English, word by word.
-        //
-        // The English switch cannot simply step aside.  Stepping aside only
-        // brings OUR replacements back to English - those had an English
-        // original to begin with.  Strings the game and the map wrote themselves
-        // are Chinese and STAY Chinese, and a map whose font has no CJK glyphs
-        // draws them as boxes no matter what we do.  So they get translated
-        // here, using the dictionary reversed (tools/make_zh_to_en.py).  Words
-        // the table does not know are left as they are - those stay Chinese,
-        // which is the one case this switch cannot help with.
-        //
-        // Longest match wins, walking left to right, so a table holding both
-        // "剩余" and "剩余敌人" picks the longer one.
         // [LOCAL] Full-width punctuation lives in the CJK ranges, so a font with
         // Latin glyphs only draws it as a box exactly like a Han character does.
         // These are the ones the game actually emits, each mapped to its ASCII

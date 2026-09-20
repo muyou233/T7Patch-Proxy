@@ -26,9 +26,6 @@ GAME_DICT = r"F:\SteamLibrary\steamapps\common\Call of Duty Black Ops III\T7Patc
 REPO_DICT = r"E:\MyProject\T7Patch\T7Patch-Proxy-Private\translate\translate_zh.txt"
 RAW_URL = "https://raw.githubusercontent.com/muyou233/T7Patch-Proxy/main/translate/translate_zh.txt"
 
-# 中文→英文 反查表（口口口兜底「英文」用）：从中文字库反向派生，同样没有远端源。
-GAME_ZH2EN = GAME_DICT.replace("translate_zh.txt", "translate_en.txt")
-REPO_ZH2EN = REPO_DICT.replace("translate_zh.txt", "translate_en.txt")
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 VERSION_RE = re.compile(rb"^#\s*version:\s*(\S+)", re.I | re.M)
@@ -94,26 +91,11 @@ def cmd_deploy(args):
         print("源不存在：%s" % REPO_DICT)
         return 1
 
-    # 反查表同理（纯文本处理，不依赖 pypinyin）。
-    try:
-        import subprocess
-        rc = subprocess.call([sys.executable,
-                              os.path.join(HERE, "make_zh_to_en.py")])
-        print("反查表已重建：%s" % REPO_ZH2EN if rc == 0
-              else "反查表重建失败（rc=%d）" % rc)
-    except Exception as exc:  # noqa: BLE001
-        print("反查表重建跳过：%s" % exc)
-
     before = sha256(GAME_DICT) if os.path.exists(GAME_DICT) else ""
     atomic_write(REPO_DICT, GAME_DICT)
     print("已部署：%s" % describe("game", GAME_DICT))
     print("替换前 sha256=%s" % (before[:16] or "(原先不存在)"))
     print("旧的已留档：%s.old" % GAME_DICT)
-
-    if os.path.exists(REPO_ZH2EN):
-        atomic_write(REPO_ZH2EN, GAME_ZH2EN)
-        print("已部署英文反查表：%s（%d 字节）"
-              % (GAME_ZH2EN, os.path.getsize(GAME_ZH2EN)))
 
     print("游戏内约 2 秒后热加载（无需重启游戏）。")
     return 0
