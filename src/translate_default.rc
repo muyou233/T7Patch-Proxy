@@ -36,10 +36,10 @@
 // the directory of the resource script), i.e.
 // <repo>\translate\translate_zh.builtin.txt.
 
-// [LOCAL] 2026-09-20: the pinyin table rides along under the same rules - the
-// pinned snapshot (translate_pinyin.builtin.txt) is what ships inside the dll,
-// the external translate_pinyin.txt still wins whenever it is usable, and
-// refreshing the snapshot is a deliberate release step (byte copy + rebuild).
+// [LOCAL] 2026-09-20: the pinyin table is the one file with no live copy - it
+// ships inside the dll and is read from there, full stop.  It is fixed data
+// (GB2312 + the multi-pronunciation phrases), so a rebuild is the only way it
+// can change and nothing sits next to d3d11.dll to go stale.
 // See IDR_TRANSLATE_PINYIN in translate_res.h.
 #include <windows.h>
 #include "translate_res.h"

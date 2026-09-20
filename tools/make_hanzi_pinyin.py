@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Build translate/translate_pinyin.txt - one Han character -> its pinyin.
+"""Build translate/translate_pinyin.builtin.txt - one Han character -> its pinyin.
+
+The name says "builtin" because that is the only copy there is: the table is
+compiled into the dll (IDR_TRANSLATE_PINYIN, see src/translate_default.rc) and
+read from there at run time.  There is no live copy next to d3d11.dll - an
+external file used to take precedence, which let a stale one silently override
+the table inside the binary.
 
 Why this exists (2026-09-20, user's final decision)
 ---------------------------------------------------
@@ -31,7 +37,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "..", "translate", "translate_pinyin.txt")
+OUT = os.path.join(HERE, "..", "translate", "translate_pinyin.builtin.txt")
 
 # The basic CJK block.  Extension A is left out: those characters are rare by
 # definition, and every entry costs memory in the runtime table.
